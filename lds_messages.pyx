@@ -13,7 +13,6 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 
 from libcpp.vector cimport vector
 
-# TODO make switching/inhomog version
 # TODO make cholesky update/downdate versions
 # TODO make (generate?) single-precision version
 # TODO make kalman smoother (e.g. for EM)
@@ -23,7 +22,7 @@ from libcpp.vector cimport vector
 # NOTE: clean version of the code is like 1.5-3% slower due to struct passing
 # overhead, but much nicer
 
-def kalman_filter_clean(
+def kalman_filter(
     double[::1] mu_init, double[:,:] sigma_init,
     double[:,:] A, double[:,:] sigma_states,
     double[:,:] C, double[:,:] sigma_obs,
@@ -61,7 +60,7 @@ def kalman_filter_clean(
 
     return np.asarray(filtered_mus), np.asarray(filtered_sigmas)
 
-def filter_and_sample_clean(
+def filter_and_sample(
     double[::1] mu_init, double[:,:] sigma_init,
     double[:,:] A, double[:,:] sigma_states,
     double[:,:] C, double[:,:] sigma_obs,
