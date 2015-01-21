@@ -5,9 +5,11 @@ from pyhsmm.util.general import AR_striding
 
 from lds_messages import filter_and_sample
 
+# TODO stable initialization
+
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,
-            generate=True,initialize_from_prior=True):
+            generate=True,initialize_from_prior=False,initialize_to_noise=True):
         self.model = model
         self.data = data
 
@@ -17,10 +19,13 @@ class LDSStates(object):
         if stateseq is not None:
             self.stateseq = stateseq
         elif generate:
-            if data is not None and not initialize_from_prior:
+            if data is not None and not (initialize_from_prior or initialize_to_noise):
                 self.resample()
             else:
-                self.generate_states()
+                if initialize_from_prior:
+                    self.generate_states()
+                else:
+                    self.stateseq = np.random.normal(size=(self.T,self.n))
 
     ### model properties
 
@@ -91,4 +96,7 @@ class LDSStates(object):
         self.stateseq = filter_and_sample(self.mu_init, self.sigma_init,
                 self.A, self.sigma_states, self.C, self.sigma_obs,
                 self.data)
+
+    def E_step(self):
+        raise NotImplementedError # TODO kalman smoother
 

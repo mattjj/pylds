@@ -17,26 +17,40 @@ class _LDSBase(Model):
         self.states_list = []
 
     def add_data(self,data,**kwargs):
-        self.states_list.append(LDSStates(data,**kwargs))
-
-    def generate(self):
-        raise NotImplementedError
+        self.states_list.append(LDSStates(model=self,data=data,**kwargs))
 
     def log_likelihood(self):
         raise NotImplementedError
+
+    def generate(self,T,keep=True):
+        s = LDSStates(model=self,T=T,initialize_from_prior=True)
+        data = self._generate_obs(s)
+        if keep:
+            self.states_list.append(s)
+        return data, s.stateseq
+
+    def _generate_obs(self,s):
+        if s.data is None:
+            s.data = self.emission_distn.rvs(x=s.stateseq,return_xy=False)
+        else:
+            # filling in missing data
+            raise NotImplementedError
+        return s.data
 
     ### convenience properties
 
     @property
     def n(self):
+        'latent dimension'
         return self.emission_distn.D_in
 
     @property
     def p(self):
+        'emission dimension'
         return self.emission_distn.D_out
 
-class _LDSGibbsSampling(ModelGibbsSampling):
-    def resample(self):
+class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
+    def resample_model(self):
         self.resample_states()
         self.resample_parameters()
 
@@ -46,7 +60,7 @@ class _LDSGibbsSampling(ModelGibbsSampling):
 
     def resample_parameters(self):
         self.resample_init_dynamics_distn()
-        self.resample_dynamcis_distn()
+        self.resample_dynamics_distn()
         self.resample_emission_distn()
 
     def resample_init_dynamics_distn(self):
@@ -59,17 +73,35 @@ class _LDSGibbsSampling(ModelGibbsSampling):
         self.emission_distn.resample([np.hstack((s.stateseq,s.data)) for s in self.states_list])
 
 
-def _LDSEM(ModelEM):
+class _LDSEM(_LDSBase,ModelEM):
     def EM_step(self):
         assert len(self.states_list) > 0
-        self._E_step()
-        self._M_step()
+        self.E_step()
+        self.M_step()
 
-    def _E_step(self):
-        raise NotImplementedError
+    def E_step(self):
+        for s in self.states_list:
+            s.E_step()
 
-    def _M_Step(self):
-        raise NotImplementedError
+    def M_Step(self):
+        self.M_step_init_dynamics_distn()
+        self.M_step_dynamics_distn()
+        self.M_step_emission_distn()
+
+    def M_step_init_dynamics_distn(self):
+        self.init_dynamics_distn.max_likelihood(
+            stats=(sum(s.E_mu_init for s in self.states_list),
+                   sum(s.E_sigma_init for s in self.states_list)))
+
+    def M_step_dynamics_distn(self):
+        self.dynamics_distn.max_likelihood(
+            stats=(sum(s.E_mu_dynamics for s in self.states_list),
+                   sum(s.E_sigma_dynamics for s in self.states_list)))
+
+    def M_step_emission_distn(self):
+        self.emission_distn.max_likelihood(
+            stats=(sum(s.E_mu_emissions for s in self.states_list),
+                   sum(s.E_sigma_emissions for s in self.states_list)))
 
 class LDS(_LDSGibbsSampling,_LDSEM):
     pass
