@@ -19,7 +19,6 @@ sigma_init = 0.01*np.eye(2)
 
 A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
                    [np.sin(np.pi/24),  np.cos(np.pi/24)]])
-# A = 0.99*np.eye(2)
 sigma_states = 0.01*np.eye(2)
 
 C = np.array([[10.,0.]])
@@ -47,8 +46,7 @@ model = LDS(
         emission_distn=Regression(nu_0=2.,S_0=np.eye(1),M_0=np.zeros((1,2)),K_0=5*np.eye(2)),
         )
 
-model.add_data(data,stateseq=stateseq)
-# model.add_data(data)
+model.add_data(data)
 
 model.resample_parameters()
 for _ in progprint_xrange(100):
