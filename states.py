@@ -1,11 +1,9 @@
 from __future__ import division
 import numpy as np
 
-from pyhsmm.util.general import AR_striding
+from pybasicbayes.util.general import AR_striding
 
-from lds_messages import filter_and_sample
-
-# TODO stable initialization
+from lds_messages import filter_and_sample, E_step
 
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,
@@ -93,10 +91,14 @@ class LDSStates(object):
     ### resampling
 
     def resample(self):
-        self.stateseq = filter_and_sample(self.mu_init, self.sigma_init,
+        self.stateseq = filter_and_sample(
+                self.mu_init, self.sigma_init,
                 self.A, self.sigma_states, self.C, self.sigma_obs,
                 self.data)
 
     def E_step(self):
-        raise NotImplementedError # TODO kalman smoother
+        self.E_x1x1, self.E_xt_xtp1, self.E_xt_yt = E_step(
+                self.mu_init, self.sigma_init,
+                self.A, self.sigma_states, self.C, self.sigma_obs,
+                self.data)
 

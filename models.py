@@ -5,6 +5,9 @@ from pyhsmm.basic.abstractions import Model, ModelGibbsSampling, ModelEM
 
 from states import LDSStates
 
+# TODO make separate versions for stationary, nonstationary,
+# nonstationary-and-distinct-for-each-sequence
+
 # NOTE: dynamics_distn should probably be an instance of AutoRegression,
 # emission_distn should probably be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
@@ -90,18 +93,15 @@ class _LDSEM(_LDSBase,ModelEM):
 
     def M_step_init_dynamics_distn(self):
         self.init_dynamics_distn.max_likelihood(
-            stats=(sum(s.E_mu_init for s in self.states_list),
-                   sum(s.E_sigma_init for s in self.states_list)))
+            stats=(sum(s.E_x1_x1 for s in self.states_list)))
 
     def M_step_dynamics_distn(self):
         self.dynamics_distn.max_likelihood(
-            stats=(sum(s.E_mu_dynamics for s in self.states_list),
-                   sum(s.E_sigma_dynamics for s in self.states_list)))
+            stats=(sum(s.E_xt_xtp1 for s in self.states_list)))
 
     def M_step_emission_distn(self):
         self.emission_distn.max_likelihood(
-            stats=(sum(s.E_mu_emissions for s in self.states_list),
-                   sum(s.E_sigma_emissions for s in self.states_list)))
+            stats=(sum(s.E_xt_yt for s in self.states_list)))
 
 class LDS(_LDSGibbsSampling,_LDSEM):
     pass

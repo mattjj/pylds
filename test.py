@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from pybasicbayes.distributions import Gaussian, Regression
+from pybasicbayes.util.text import progprint_xrange
 from autoregressive.distributions import AutoRegression
-from pyhsmm.util.text import progprint_xrange
 
 from models import LDS
 
