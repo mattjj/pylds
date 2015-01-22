@@ -29,7 +29,6 @@ sigma_obs = 0.01*np.eye(1)
 ###################
 
 truemodel = LDS(
-        init_dynamics_distn=Gaussian(mu=mu_init,sigma=sigma_init),
         dynamics_distn=AutoRegression(A=A,sigma=sigma_states),
         emission_distn=Regression(A=C,sigma=sigma_obs)
         )
@@ -41,7 +40,6 @@ data, stateseq = truemodel.generate(2000)
 ###############
 
 model = LDS(
-        init_dynamics_distn=Gaussian(mu_0=np.zeros(2),nu_0=3.,sigma_0=3*np.eye(2),kappa_0=1.),
         dynamics_distn=AutoRegression(nu_0=3.,S_0=np.eye(2),M_0=np.zeros((2,2)),K_0=5*np.eye(2)),
         emission_distn=Regression(nu_0=2.,S_0=np.eye(1),M_0=np.zeros((1,2)),K_0=5*np.eye(2)),
         )

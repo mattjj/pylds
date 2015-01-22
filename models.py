@@ -1,7 +1,9 @@
 from __future__ import division
 import numpy as np
 
-from pyhsmm.basic.abstractions import Model, ModelGibbsSampling, ModelEM
+import pydare
+
+from pybasicbayes.abstractions import Model, ModelGibbsSampling, ModelEM
 
 from states import LDSStates
 
@@ -12,11 +14,16 @@ from states import LDSStates
 # emission_distn should probably be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
 
+
+############
+#  mixins  #
+############
+
+
 class _LDSBase(Model):
-    def __init__(self,dynamics_distn,emission_distn,init_dynamics_distn):
+    def __init__(self,dynamics_distn,emission_distn):
         self.dynamics_distn = dynamics_distn
         self.emission_distn = emission_distn
-        self.init_dynamics_distn = init_dynamics_distn
         self.states_list = []
 
     def add_data(self,data,**kwargs):
@@ -52,6 +59,14 @@ class _LDSBase(Model):
         'emission dimension'
         return self.emission_distn.D_out
 
+    @property
+    def mu_init(self):
+        return np.zeros(self.n)
+
+    @property
+    def sigma_init(self):
+        return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma)
+
 class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
     def resample_model(self):
         self.resample_states()
@@ -62,12 +77,8 @@ class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
             s.resample()
 
     def resample_parameters(self):
-        self.resample_init_dynamics_distn()
         self.resample_dynamics_distn()
         self.resample_emission_distn()
-
-    def resample_init_dynamics_distn(self):
-        self.init_dynamics_distn.resample([s.stateseq[0] for s in self.states_list])
 
     def resample_dynamics_distn(self):
         self.dynamics_distn.resample([s.strided_stateseq for s in self.states_list])
@@ -103,6 +114,33 @@ class _LDSEM(_LDSBase,ModelEM):
         self.emission_distn.max_likelihood(
             stats=(sum(s.E_xt_yt for s in self.states_list)))
 
-class LDS(_LDSGibbsSampling,_LDSEM):
+
+###################
+#  model classes  #
+###################
+
+
+class LDS(_LDSGibbsSampling):
     pass
+
+
+class NonstationaryLDS(_LDSGibbsSampling):
+    def __init__(self,init_dynamics_distn,*args,**kwargs):
+        self.init_dynamics_distn = init_dynamics_distn
+        super(StationaryLDS,self).__init__(*args,**kwargs)
+
+    def resample_parameters(self):
+        self.resample_init_dynamics_distn()
+        super(StationaryLDS,self).resample_parameters()
+
+    def resample_init_dynamics_distn(self):
+        self.init_dynamics_distn.resample([s.stateseq[0] for s in self.states_list])
+
+    @property
+    def mu_init(self):
+        return self.init_dynamics_distn.mu
+
+    @property
+    def sigma_init(self):
+        return self.init_dynamics_distn.sigma
 

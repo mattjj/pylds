@@ -36,8 +36,12 @@ class LDSStates(object):
         return self.model.dynamics_distn
 
     @property
-    def init_dynamics_distn(self):
-        return self.model.init_dynamics_distn
+    def mu_init(self):
+        return self.model.mu_init
+
+    @property
+    def sigma_init(self):
+        return self.model.sigma_init
 
     @property
     def n(self):
@@ -46,14 +50,6 @@ class LDSStates(object):
     @property
     def p(self):
         return self.model.p
-
-    @property
-    def mu_init(self):
-        return self.init_dynamics_distn.mu
-
-    @property
-    def sigma_init(self):
-        return self.init_dynamics_distn.sigma
 
     @property
     def A(self):
