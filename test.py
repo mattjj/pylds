@@ -6,7 +6,7 @@ from pybasicbayes.distributions import Gaussian, Regression
 from pybasicbayes.util.text import progprint_xrange
 from autoregressive.distributions import AutoRegression
 
-from models import LDS
+from models import LDS, DefaultLDS
 
 np.random.seed(0)
 
@@ -39,14 +39,8 @@ data, stateseq = truemodel.generate(2000)
 #  fit model  #
 ###############
 
-model = LDS(
-        dynamics_distn=AutoRegression(nu_0=3.,S_0=np.eye(2),M_0=np.zeros((2,2)),K_0=5*np.eye(2)),
-        emission_distn=Regression(nu_0=2.,S_0=np.eye(1),M_0=np.zeros((1,2)),K_0=5*np.eye(2)),
-        )
+model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
 
-model.add_data(data)
-
-model.resample_parameters()
 for _ in progprint_xrange(100):
     model.resample_model()
 
