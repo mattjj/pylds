@@ -14,6 +14,7 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 from libc.math import isnan
 from libcpp.vector cimport vector
 
+# TODO make missing data work... i don't think it is right now
 # TODO RTS smoother
 # TODO E_step (smooth augmented state)
 # TODO cholesky update/downdate versions
