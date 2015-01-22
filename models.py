@@ -28,6 +28,7 @@ class _LDSBase(Model):
 
     def add_data(self,data,**kwargs):
         self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        return self
 
     def log_likelihood(self):
         raise NotImplementedError
@@ -69,8 +70,8 @@ class _LDSBase(Model):
 
 class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
     def resample_model(self):
-        self.resample_states()
         self.resample_parameters()
+        self.resample_states()
 
     def resample_states(self):
         for s in self.states_list:
@@ -143,4 +144,19 @@ class NonstationaryLDS(_LDSGibbsSampling):
     @property
     def sigma_init(self):
         return self.init_dynamics_distn.sigma
+
+
+##############################
+#  convenience constructors  #
+##############################
+
+
+from pybasicbayes.distributions import Regression
+from autoregressive.distributions import AutoRegression
+
+def DefaultLDS(n,p):
+    return LDS(
+        dynamics_distn=AutoRegression(nu_0=n+1,S_0=np.eye(n),M_0=np.zeros((n,n)),K_0=np.eye(n)),
+        emission_distn=Regression(nu_0=p+1,S_0=np.eye(p),M_0=np.zeros((p,n)),K_0=np.eye(n)),
+        )
 
