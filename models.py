@@ -27,7 +27,14 @@ class _LDSBase(Model):
         self.states_list = []
 
     def add_data(self,data,**kwargs):
+        assert isinstance(data,np.ndarray)
         self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        return self
+
+    def add_datas(self,data_kwargs):
+        assert isinstance(data,list)
+        for kwargs in data_kwargs:
+            self.add_data(**kwargs)
         return self
 
     def log_likelihood(self):
@@ -67,6 +74,10 @@ class _LDSBase(Model):
     @property
     def sigma_init(self):
         return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma)
+
+    @property
+    def is_stable(self):
+        return np.max(np.abs(np.linalg.eivals(self.dynamics_distn.A))) < 1.
 
 class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
     def resample_model(self):
