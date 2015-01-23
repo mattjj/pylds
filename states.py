@@ -3,7 +3,7 @@ import numpy as np
 
 from pybasicbayes.util.general import AR_striding
 
-from lds_messages import filter_and_sample, E_step
+from lds_messages import filter_and_sample, E_step, rts_smoother
 
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,

@@ -41,11 +41,6 @@ data, stateseq = truemodel.generate(2000)
 
 model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
 
-model.dynamics_distn.A = A
-model.dynamics_distn.sigma = sigma_states
-model.emission_distn.A = C
-model.emission_distn.sigma = sigma_obs
-
 for _ in progprint_xrange(100):
     model.resample_model()
 
