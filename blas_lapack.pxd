@@ -1,4 +1,4 @@
-# distutils: extra_compile_args = -O3 -w -ffast-math
+# distutils: extra_compile_args = -O3 -w
 # cython: boundscheck = False, nonecheck = False, wraparound = False, cdivision = True
 
 from cython cimport floating

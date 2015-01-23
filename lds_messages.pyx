@@ -11,9 +11,6 @@ from blas_lapack cimport r_gemv, r_gemm, r_symv, r_symm, \
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv
 
-from libc.math import isnan
-from libcpp.vector cimport vector
-
 # TODO make missing data work... i don't think it is right now
 # TODO RTS smoother
 # TODO E_step (smooth augmented state)
@@ -130,7 +127,7 @@ cdef inline void condition_on(
     double[:] mu_cond, double[:,:] sigma_cond,
     # temps
     double[:] temp_p, double[:,:] temp_pn, double[:,:] temp_pp,
-    ):
+    ) nogil:
     cdef int n = A.shape[1], p = A.shape[0]
     cdef int nn = n*n, pp = p*p
     cdef int inc = 1, info = 0
@@ -138,7 +135,7 @@ cdef inline void condition_on(
 
     # NOTE: this routine could actually call predict (a pxn version)
 
-    if isnan(y[0]):
+    if y[0] != y[0]:
         dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
         dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
     else:
@@ -169,7 +166,7 @@ cdef inline void predict(
     double[:] mu_predict, double[:,:] sigma_predict,
     # temps
     double[:,:] temp_nn,
-    ):
+    ) nogil:
     cdef int n = mu.shape[0]
     cdef int nn = n*n
     cdef int inc = 1
@@ -187,7 +184,7 @@ cdef inline void sample_gaussian(
     double[:] mu, double[:,:] sigma,
     # input/output
     double[:] randvec,
-    ):
+    ) nogil:
     cdef int n = mu.shape[0]
     cdef int inc = 1, info = 0
     cdef double one = 1.
