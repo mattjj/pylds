@@ -12,9 +12,12 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv
 
 # TODO RTS smoother
+# TODO use info form when p > n
 # TODO E_step (smooth augmented state)
-# TODO cholesky update/downdate versions
-# TODO write single-precision codepath
+# TODO cholesky update/downdate versions (square root filter)
+# TODO write single-precision codepath?
+# TODO check that sequence of BLAS/LAPACK calls are compiled to just that and
+# there isn't any extra checking or dereferencing going on
 
 # NOTE: I tried the dsymm / dsyrk version and it was slower, even for larger p!
 # NOTE: for symmetric matrices, F/C order doesn't matter
@@ -58,6 +61,56 @@ def kalman_filter(
             temp_nn)
 
     return np.asarray(filtered_mus), np.asarray(filtered_sigmas)
+
+def rts_smoother(
+    double[::1] mu_init, double[:,:] sigma_init,
+    double[:,:] A, double[:,:] sigma_states,
+    double[:,:] C, double[:,:] sigma_obs,
+    double[:,::1] data):
+
+    ### allocate temporaries and internals
+    cdef int t, T = data.shape[0]
+    cdef int n = C.shape[1], p = C.shape[0]
+
+    cdef double[:,:] mu_predicts = np.empty((T+1,n))
+    cdef double[:,:,:] sigma_predicts = np.empty((T+1,n,n))
+
+    cdef double[::1,:] _A = np.asfortranarray(A)
+    cdef double[::1,:] _C = np.asfortranarray(C)
+
+    cdef double[::1,:] temp_pp  = np.empty((p,p),order='F')
+    cdef double[::1,:] temp_pn  = np.empty((p,n),order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
+    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
+    cdef double[::1]   temp_p   = np.empty((p,), order='F')
+
+    ### allocate output
+    cdef double[:,:] smoothed_mus = np.empty((T,n))
+    cdef double[:,:,:] smoothed_sigmas = np.empty((T,n,n))
+
+    ### run filter forwards, saving predictions
+    mu_predicts[0] = mu_init
+    sigma_predicts[0] = sigma_init
+    for t in range(T):
+        condition_on(
+            mu_predicts[t], sigma_predicts[t], _C, sigma_obs, data[t],
+            smoothed_mus[t], smoothed_sigmas[t],
+            temp_p, temp_pn, temp_pp)
+        predict(
+            smoothed_mus[t], smoothed_sigmas[t], _A, sigma_states,
+            mu_predicts[t+1], sigma_predicts[t+1],
+            temp_nn)
+
+    ### run rts update backwards, using predictions
+    for t in range(T-2,-1,-1):
+        rts_backward_step(
+            _A, sigma_states,
+            smoothed_mus[t], smoothed_sigmas[t],
+            mu_predicts[t+1], sigma_predicts[t+1],
+            smoothed_mus[t+1], smoothed_sigmas[t+1],
+            temp_nn, temp_nn2)
+
+    return np.asarray(smoothed_mus), np.asarray(smoothed_sigmas)
 
 def filter_and_sample(
     double[::1] mu_init, double[:,:] sigma_init,
@@ -191,4 +244,30 @@ cdef inline void sample_gaussian(
     dpotrf('L', &n, &sigma[0,0], &n, &info)
     dtrmv('L', 'N', 'N', &n, &sigma[0,0], &n, &randvec[0], &inc)
     daxpy(&n, &one, &mu[0], &inc, &randvec[0], &inc)
+
+cdef inline void rts_backward_step(
+        double[:,:] A, double[:,:] sigma_states,
+        double[:] filtered_mu, double[:,:] filtered_sigma, # inputs/outputs
+        double[:] next_predict_mu, double[:,:] next_predict_sigma, # mutated inputs!
+        double[:] next_smoothed_mu, double[:,:] next_smoothed_sigma,
+        double[:,:] temp_nn, double[:,:] temp_nn2,
+        ) nogil:
+
+    cdef int n = A.shape[0]
+    cdef int nn = n*n
+    cdef int inc = 1, info = 0
+    cdef double one = 1., zero = 0., neg1 = -1.
+
+    dgemm('N', 'N', &n, &n, &n, &one, &A[0,0], &n, &filtered_sigma[0,0], &n, &zero, &temp_nn[0,0], &n)
+    # TODO: could just call dposv directly instead of dpotrf+dpotrs
+    dcopy(&nn, &next_predict_sigma[0,0], &inc, &temp_nn2[0,0], &inc)
+    dpotrf('L', &n, &temp_nn2[0,0], &n, &info)
+    dpotrs('L', &n, &n, &temp_nn2[0,0], &n, &temp_nn[0,0], &n, &info)
+
+    daxpy(&n, &neg1, &next_smoothed_mu[0], &inc, &next_predict_mu[0], &inc)
+    dgemv('T', &n, &n, &neg1, &temp_nn[0,0], &n, &next_predict_mu[0], &inc, &one, &filtered_mu[0], &inc)
+
+    daxpy(&nn, &neg1, &next_smoothed_sigma[0,0], &inc, &next_predict_sigma[0,0], &inc)
+    dgemm('N', 'N', &n, &n, &n, &neg1, &next_predict_sigma[0,0], &n, &temp_nn[0,0], &n, &zero, &temp_nn2[0,0], &n)
+    dgemm('T', 'N', &n, &n, &n, &one, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &one, &filtered_sigma[0,0], &n)
 
