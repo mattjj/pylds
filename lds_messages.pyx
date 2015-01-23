@@ -11,7 +11,6 @@ from blas_lapack cimport r_gemv, r_gemm, r_symv, r_symm, \
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv
 
-# TODO make missing data work... i don't think it is right now
 # TODO RTS smoother
 # TODO E_step (smooth augmented state)
 # TODO cholesky update/downdate versions

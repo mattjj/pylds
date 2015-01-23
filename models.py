@@ -31,12 +31,6 @@ class _LDSBase(Model):
         self.states_list.append(LDSStates(model=self,data=data,**kwargs))
         return self
 
-    def add_datas(self,data_kwargs):
-        assert isinstance(data,list)
-        for kwargs in data_kwargs:
-            self.add_data(**kwargs)
-        return self
-
     def log_likelihood(self):
         raise NotImplementedError
 
