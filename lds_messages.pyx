@@ -11,7 +11,6 @@ from blas_lapack cimport r_gemv, r_gemm, r_symv, r_symm, \
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv
 
-# TODO RTS smoother
 # TODO use info form when p > n
 # TODO E_step (smooth augmented state)
 # TODO cholesky update/downdate versions (square root filter)
@@ -167,7 +166,70 @@ def E_step(
     double[:,:] A, double[:,:] sigma_states,
     double[:,:] C, double[:,:] sigma_obs,
     double[:,::1] data):
-    pass
+
+    # NOTE: this is almost the same as the RTS smoother except
+    #   1. we collect statistics along the way, and
+    #   2. we use the RTS gain matrix to do it
+    # We could also write this as RTS smoothing on an augmented state space
+
+    ### allocate temporaries and internals
+    cdef int t, T = data.shape[0]
+    cdef int n = C.shape[1], p = C.shape[0]
+
+    cdef double[:,:] mu_predicts = np.empty((T+1,n))
+    cdef double[:,:,:] sigma_predicts = np.empty((T+1,n,n))
+
+    cdef double[::1,:] _A = np.asfortranarray(A)
+    cdef double[::1,:] _C = np.asfortranarray(C)
+
+    cdef double[::1,:] temp_pp  = np.empty((p,p),order='F')
+    cdef double[::1,:] temp_pn  = np.empty((p,n),order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
+    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
+    cdef double[::1]   temp_p   = np.empty((p,), order='F')
+
+    ### allocate output
+    cdef double[:,:] smoothed_mus = np.empty((T,n))
+    cdef double[:,:,:] smoothed_sigmas = np.empty((T,n,n))
+
+    cdef double[:,:] E_x1_x1 = np.zeros((n,n))
+    cdef double[:,:] E_xt_xtp1 = np.zeros((n,n),order='F')
+
+#     ### run filter forwards, saving predictions
+#     mu_predicts[0] = mu_init
+#     sigma_predicts[0] = sigma_init
+#     for t in range(T):
+#         condition_on(
+#             mu_predicts[t], sigma_predicts[t], _C, sigma_obs, data[t],
+#             smoothed_mus[t], smoothed_sigmas[t],
+#             temp_p, temp_pn, temp_pp)
+#         predict(
+#             smoothed_mus[t], smoothed_sigmas[t], _A, sigma_states,
+#             mu_predicts[t+1], sigma_predicts[t+1],
+#             temp_nn)
+
+#     ### run rts update backwards, using predictions
+#     for t in range(T-2,-1,-1):
+#         rts_backward_step(
+#             _A, sigma_states,
+#             smoothed_mus[t], smoothed_sigmas[t],
+#             mu_predicts[t+1], sigma_predicts[t+1],
+#             smoothed_mus[t+1], smoothed_sigmas[t+1],
+#             temp_nn, temp_nn2)
+#         _update_dynamics_stats(
+#             smoothed_mus[t], smoothed_sigmas[t],
+#             smoothed_mus[t+1], smoothed_sigmas[t+1],
+#             temp_nn, E_xt_xtp1)
+#         _update_emission_stats(
+#             smoothed_mus[t+1], smoothed_sigmas[t+1],
+#             E_xt_yt)
+#     _update_emission_stats(
+#             smoothed_mus[0], smoothed_sigmas[0],
+#             E_xt_yt)
+
+#     return np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), \
+#             np.add(smoothed_sigmas[0], np.outer(smoothed_mus[0],smoothed_mus[0])), \
+#             np.asarray(E_x1_x1), np.asarray(E_xt_xtp1)
 
 ### util
 
@@ -252,6 +314,9 @@ cdef inline void rts_backward_step(
         double[:] next_smoothed_mu, double[:,:] next_smoothed_sigma,
         double[:,:] temp_nn, double[:,:] temp_nn2,
         ) nogil:
+
+    # NOTE: temp_nn holds the RTS gain G_t in the notation of Thm 8.2 of
+    # Sarkka 2013 "Bayesian Filtering and Smoothing" (CUP)
 
     cdef int n = A.shape[0]
     cdef int nn = n*n
