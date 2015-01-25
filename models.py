@@ -14,11 +14,9 @@ from states import LDSStates
 # emission_distn should probably be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
 
-
-############
-#  mixins  #
-############
-
+######################
+#  algorithm mixins  #
+######################
 
 class _LDSBase(Model):
     def __init__(self,dynamics_distn,emission_distn):
@@ -31,8 +29,16 @@ class _LDSBase(Model):
         self.states_list.append(LDSStates(model=self,data=data,**kwargs))
         return self
 
-    def log_likelihood(self):
-        raise NotImplementedError
+    def log_likelihood(self,data=None):
+        if data is not None:
+            assert isinstance(data,(list,np.ndarray))
+            if isinstance(data,np.ndarray):
+                self.add_data(data=data,generate=False)
+                return self.states_list.pop().log_likelihood()
+            else:
+                return sum(self.log_likelihood(d) for d in data)
+        else:
+            return sum(s.log_likelihood() for s in self.states_list)
 
     def generate(self,T,keep=True):
         s = LDSStates(model=self,T=T,initialize_from_prior=True)
@@ -49,7 +55,7 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    ### convenience properties
+    # convenience properties
 
     @property
     def n(self):
@@ -70,8 +76,41 @@ class _LDSBase(Model):
         return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma)
 
     @property
+    def A(self):
+        return self.dynamics_distn.A
+
+    @A.setter
+    def A(self,A):
+        self.dynamics_distn.A = A
+
+    @property
+    def sigma_states(self):
+        return self.dynamics_distn.sigma
+
+    @sigma_states.setter
+    def sigma_states(self,sigma_states):
+        self.dynamics_distn.sigma = sigma_states
+
+    @property
+    def C(self):
+        return self.emission_distn.A
+
+    @C.setter
+    def C(self,C):
+        self.emission_distn.A = C
+
+    @property
+    def sigma_obs(self):
+        return self.emission_distn.sigma
+
+    @sigma_obs.setter
+    def sigma_obs(self,sigma_obs):
+        self.emission_distn.sigma = sigma_obs
+
+    @property
     def is_stable(self):
         return np.max(np.abs(np.linalg.eivals(self.dynamics_distn.A))) < 1.
+
 
 class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
     def resample_model(self):
@@ -87,15 +126,26 @@ class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
         self.resample_emission_distn()
 
     def resample_dynamics_distn(self):
-        self.dynamics_distn.resample([s.strided_stateseq for s in self.states_list])
+        self.dynamics_distn.resample(
+            [s.strided_stateseq for s in self.states_list])
 
     def resample_emission_distn(self):
-        self.emission_distn.resample([np.hstack((s.stateseq,s.data)) for s in self.states_list])
+        self.emission_distn.resample(
+            [np.hstack((s.stateseq,s.data)) for s in self.states_list])
+
+
+class _NonstationaryLDSGibbsSampling(_LDSGibbsSampling):
+    def resample_model(self):
+        self.resample_init_dynamics_distn()
+        super(_NonstationaryLDSGibbsSampling,self).resample_model()
+
+    def resample_init_dynamics_distn(self):
+        self.init_dynamics_distn.resample(
+            [s.stateseq[0] for s in self.states_list])
 
 
 class _LDSEM(_LDSBase,ModelEM):
     def EM_step(self):
-        assert len(self.states_list) > 0
         self.E_step()
         self.M_step()
 
@@ -103,65 +153,95 @@ class _LDSEM(_LDSBase,ModelEM):
         for s in self.states_list:
             s.E_step()
 
-    def M_Step(self):
-        self.M_step_init_dynamics_distn()
+    def M_step(self):
         self.M_step_dynamics_distn()
         self.M_step_emission_distn()
+
+    def M_step_dynamics_distn(self):
+        self.dynamics_distn.max_likelihood(
+            data=None,
+            stats=(sum(s.E_dynamics_stats for s in self.states_list)))
+
+    def M_step_emission_distn(self):
+        self.emission_distn.max_likelihood(
+            data=None,
+            stats=(sum(s.E_emission_stats for s in self.states_list)))
+
+
+class _NonstationaryLDSEM(_LDSEM):
+    def M_Step(self):
+        self.M_step_init_dynamics_distn()
+        super(_NonstationaryLDSEM,self).M_step()
 
     def M_step_init_dynamics_distn(self):
         self.init_dynamics_distn.max_likelihood(
             stats=(sum(s.E_x1_x1 for s in self.states_list)))
-
-    def M_step_dynamics_distn(self):
-        self.dynamics_distn.max_likelihood(
-            stats=(sum(s.E_xt_xtp1 for s in self.states_list)))
-
-    def M_step_emission_distn(self):
-        self.emission_distn.max_likelihood(
-            stats=(sum(s.E_xt_yt for s in self.states_list)))
 
 
 ###################
 #  model classes  #
 ###################
 
-
-class LDS(_LDSGibbsSampling):
+class LDS(_LDSGibbsSampling,_LDSEM,_LDSBase):
     pass
 
 
-class NonstationaryLDS(_LDSGibbsSampling):
+class NonstationaryLDS(
+        _NonstationaryLDSGibbsSampling,
+        _NonstationaryLDSEM,
+        _LDSBase):
     def __init__(self,init_dynamics_distn,*args,**kwargs):
         self.init_dynamics_distn = init_dynamics_distn
-        super(StationaryLDS,self).__init__(*args,**kwargs)
-
-    def resample_parameters(self):
-        self.resample_init_dynamics_distn()
-        super(StationaryLDS,self).resample_parameters()
+        super(NonstationaryLDS,self).__init__(*args,**kwargs)
 
     def resample_init_dynamics_distn(self):
-        self.init_dynamics_distn.resample([s.stateseq[0] for s in self.states_list])
+        self.init_dynamics_distn.resample(
+            [s.stateseq[0] for s in self.states_list])
+
+    # convenience properties
 
     @property
     def mu_init(self):
         return self.init_dynamics_distn.mu
 
+    @mu_init.setter
+    def mu_init(self,mu_init):
+        self.init_dynamics_distn.mu = mu_init
+
     @property
     def sigma_init(self):
         return self.init_dynamics_distn.sigma
+
+    @sigma_init.setter
+    def sigma_init(self,sigma_init):
+        self.init_dynamics_distn.sigma = sigma_init
 
 
 ##############################
 #  convenience constructors  #
 ##############################
 
+# TODO make data-dependent default constructors
+# TODO make a constructor that takes A,B,C,D
 
-from pybasicbayes.distributions import Regression
+from pybasicbayes.distributions import Regression, Gaussian
 from autoregressive.distributions import AutoRegression
 
+
 def DefaultLDS(n,p):
-    return LDS(
+    # model = NonstationaryLDS(
+    #     init_dynamics_distn=Gaussian(nu_0=n+1,sigma_0=n*np.eye(n),mu_0=np.zeros(n),kappa_0=1.),
+    #     dynamics_distn=AutoRegression(nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
+    #     emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
+
+    model = LDS(
         dynamics_distn=AutoRegression(nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
-        emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)),
-        )
+        emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
+
+    model.A = 0.99*np.eye(n)
+    model.sigma_states = np.eye(n)
+    model.C = np.random.randn(p,n)
+    model.sigma_obs = 0.1*np.eye(p)
+
+    return model
 

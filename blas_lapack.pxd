@@ -15,6 +15,11 @@ ctypedef int dcopy_t(
     ) nogil
 cdef dcopy_t *dcopy
 
+ctypedef double dnrm2_t(
+    int *n, double *x, int *incx
+    ) nogil
+cdef dnrm2_t *dnrm2
+
 ctypedef int daxpy_t(
     int *n, double *da, double *dx, int *incx, double *dy, int *incy
     ) nogil
