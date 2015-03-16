@@ -1,7 +1,7 @@
 from __future__ import division
 import numpy as np
 
-from pybasicbayes.abstractions import Model, ModelGibbsSampling, ModelEM
+from pyhsmm.basic.abstractions import Model, ModelGibbsSampling, ModelEM
 
 from states import LDSStates
 
