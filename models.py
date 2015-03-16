@@ -3,7 +3,7 @@ import numpy as np
 
 import pydare
 
-from pybasicbayes.abstractions import Model, ModelGibbsSampling, ModelEM
+from pyhsmm.basic.abstractions import Model, ModelGibbsSampling, ModelEM
 
 from states import LDSStates
 
@@ -156,7 +156,7 @@ class NonstationaryLDS(_LDSGibbsSampling):
 ##############################
 
 
-from pybasicbayes.distributions import Regression
+from pyhsmm.basic.distributions import Regression
 from autoregressive.distributions import AutoRegression
 
 def DefaultLDS(n,p):

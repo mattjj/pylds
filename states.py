@@ -1,7 +1,7 @@
 from __future__ import division
 import numpy as np
 
-from pybasicbayes.util.general import AR_striding
+from pyhsmm.util.general import AR_striding
 
 from lds_messages import filter_and_sample, E_step, rts_smoother
 

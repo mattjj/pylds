@@ -209,23 +209,23 @@ def E_step(
             temp_nn)
 
     ### run rts update backwards, using predictions
-    for t in range(T-2,-1,-1):
-        rts_backward_step(
-            _A, sigma_states,
-            smoothed_mus[t], smoothed_sigmas[t],
-            mu_predicts[t+1], sigma_predicts[t+1],
-            smoothed_mus[t+1], smoothed_sigmas[t+1],
-            temp_nn, temp_nn2)
-        _update_dynamics_stats(
-            smoothed_mus[t], smoothed_sigmas[t],
-            smoothed_mus[t+1], smoothed_sigmas[t+1],
-            temp_nn, E_xt_xtp1)
-        _update_emission_stats(
-            smoothed_mus[t+1], smoothed_sigmas[t+1],
-            E_xt_yt)
-    _update_emission_stats(
-            smoothed_mus[0], smoothed_sigmas[0],
-            E_xt_yt)
+    # for t in range(T-2,-1,-1):
+    #     rts_backward_step(
+    #         _A, sigma_states,
+    #         smoothed_mus[t], smoothed_sigmas[t],
+    #         mu_predicts[t+1], sigma_predicts[t+1],
+    #         smoothed_mus[t+1], smoothed_sigmas[t+1],
+    #         temp_nn, temp_nn2)
+    #     _update_dynamics_stats(
+    #         smoothed_mus[t], smoothed_sigmas[t],
+    #         smoothed_mus[t+1], smoothed_sigmas[t+1],
+    #         temp_nn, E_xt_xtp1)
+    #     _update_emission_stats(
+    #         smoothed_mus[t+1], smoothed_sigmas[t+1],
+    #         E_xt_yt)
+    # _update_emission_stats(
+    #         smoothed_mus[0], smoothed_sigmas[0],
+    #         E_xt_yt)
 
     return np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), \
             np.add(smoothed_sigmas[0], np.outer(smoothed_mus[0],smoothed_mus[0])), \
