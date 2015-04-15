@@ -69,11 +69,21 @@ class _LDSBase(Model):
 
     @property
     def mu_init(self):
-        return np.zeros(self.n)
+        return np.zeros(self.n) if not hasattr(self,'_mu_init') \
+            else self._mu_init
+
+    @mu_init.setter
+    def mu_init(self,mu_init):
+        self._mu_init = mu_init
 
     @property
     def sigma_init(self):
-        return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma)
+        return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma) \
+            if not hasattr(self,'_sigma_init') else self._sigma_init
+
+    @sigma_init.setter
+    def sigma_init(self,sigma_init):
+        self._sigma_init = sigma_init
 
     @property
     def A(self):

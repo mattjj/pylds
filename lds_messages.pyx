@@ -257,7 +257,7 @@ cdef inline double condition_on(
         dpotrf('L', &p, &temp_pp[0,0], &p, &info)
 
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
-        dgemv('T', &p, &n, &neg1, &C[0,0], &p, &mu_x[0], &inc, &one, &temp_p[0], &inc)
+        dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         dtrtrs('L', 'N', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
         ll = (-1./2) * dnrm2(&p, &temp_p[0], &inc)**2
         dtrtrs('L', 'T', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)

@@ -53,19 +53,19 @@ class LDSStates(object):
 
     @property
     def A(self):
-        return self.dynamics_distn.A
+        return self.model.A
 
     @property
     def sigma_states(self):
-        return self.dynamics_distn.sigma
+        return self.model.sigma_states
 
     @property
     def C(self):
-        return self.emission_distn.A
+        return self.model.C
 
     @property
     def sigma_obs(self):
-        return self.emission_distn.sigma
+        return self.model.sigma_obs
 
     @property
     def strided_stateseq(self):
