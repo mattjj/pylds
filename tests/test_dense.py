@@ -73,7 +73,7 @@ def same_means(model,(J,h)):
     n,p,T = model.n, model.p, model.states_list[0].T
     dense_mu = np.linalg.solve(J,h).reshape((T,n))
     model_mu = model.states_list[0].smoothed_mus
-    return np.allclose(dense_mu,model_mu)
+    assert np.allclose(dense_mu,model_mu)
 
 
 def same_marginal_covs(model,(J,h)):
@@ -82,26 +82,51 @@ def same_marginal_covs(model,(J,h)):
     dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n]
                              for k in range(T)])
     model_sigmas = model.states_list[0].smoothed_sigmas
-    return np.allclose(dense_sigmas,model_sigmas)
+    assert np.allclose(dense_sigmas,model_sigmas)
 
 
-# TODO test likelihood, E-step
+# def same_loglike(model,(J,h)):
+#     dense_loglike = -1./2*h.dot(np.linalg.solve(J,h)) \
+#         + 1./2*np.linalg.slogdet(J)[1] - J.shape[0]/2.*np.log(2*np.pi)
+#     model_loglike = model.log_likelihood()
+#     assert np.isclose(dense_loglike,model_loglike)
 
 
-def test_random():
-    def helper(n,p,T):
-        data = np.random.randn(T,p)
-        model = DefaultLDS(n,p)
-        model.A = 0.99*random_rotation(n,0.01)
-        model.C = np.random.randn(p,n)
+def random_model(n,p,T):
+    data = np.random.randn(T,p)
+    model = DefaultLDS(n,p)
+    model.A = 0.99*random_rotation(n,0.01)
+    model.C = np.random.randn(p,n)
 
-        J,h = lds_to_dense_infoparams(model,data)
-        model.add_data(data).E_step()
+    J,h = lds_to_dense_infoparams(model,data)
+    model.add_data(data).E_step()
 
-        assert same_means(model,(J,h))
-        assert same_marginal_covs(model,(J,h))
+    assert J.shape[0] == J.shape[1] == model.n * model.states_list[0].T
+    assert h.shape[0] == J.shape[0]
 
+    return model, (J,h)
+
+
+def check_random_model(check):
+    n, p = np.random.randint(2,5), np.random.randint(2,5)
+    T = np.random.randint(10,20)
+    check(*random_model(n,p,T))
+
+
+def test_means():
     for _ in range(5):
-        yield helper, np.random.randint(2,5), np.random.randint(2,5), \
-            np.random.randint(10,20)
+        yield check_random_model, same_means
+
+
+def test_marginals_covs():
+    for _ in range(5):
+        yield check_random_model, same_marginal_covs
+
+
+# def test_loglike():
+#     for _ in range(5):
+#         yield check_random_model, same_loglike
+
+
+# TODO test E-step, loglike
 
