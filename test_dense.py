@@ -85,6 +85,9 @@ def same_marginal_covs(model,(J,h)):
     return np.allclose(dense_sigmas,model_sigmas)
 
 
+# TODO test likelihood, E-step
+
+
 def test_random():
     def helper(n,p,T):
         data = np.random.randn(T,p)
