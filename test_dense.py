@@ -68,28 +68,39 @@ def lds_to_dense_infoparams(model,data):
     return J.reshape(T*n,T*n), h.reshape(T*n)
 
 
-##########
-#  work  #
-##########
+###########
+#  tests  #
+###########
 
-n, p, T = 2, 3, 4
-data = np.random.randn(T,p)
+def same_means(model,(J,h)):
+    n,p,T = model.n, model.p, model.states_list[0].T
+    dense_mu = np.linalg.solve(J,h).reshape((T,n))
+    model_mu = model.states_list[0].smoothed_mus
+    return np.allclose(dense_mu,model_mu)
 
-model = DefaultLDS(n,p)
-model.A = 0.99*random_rotation(n,0.01)
-model.C = np.random.randn(p,n)
-model.sigma_init = np.eye(n)
-model.mu_init = np.zeros(n)
 
-J,h = lds_to_dense_infoparams(model,data)
-dense_mu = np.linalg.solve(J,h).reshape((T,n))
-all_dense_sigmas = np.linalg.inv(J)
-dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n] for k in range(T)])
+def same_marginal_covs(model,(J,h)):
+    n,p,T = model.n, model.p, model.states_list[0].T
+    all_dense_sigmas = np.linalg.inv(J)
+    dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n]
+                             for k in range(T)])
+    model_sigmas = model.states_list[0].smoothed_sigmas
+    return np.allclose(dense_sigmas,model_sigmas)
 
-model.add_data(data).E_step()
-model_mu = model.states_list[0].smoothed_mus
-model_sigmas = model.states_list[0].smoothed_sigmas
 
-print np.allclose(model_mu,dense_mu)
-print np.allclose(model_sigmas,dense_sigmas)
+def test_random():
+    def helper(n,p,T):
+        data = np.random.randn(T,p)
+        model = DefaultLDS(n,p)
+        model.A = 0.99*random_rotation(n,0.01)
+        model.C = np.random.randn(p,n)
+
+        J,h = lds_to_dense_infoparams(model,data)
+        model.add_data(data).E_step()
+
+        assert same_means(model,(J,h))
+        assert same_marginal_covs(model,(J,h))
+
+    for _ in range(3):
+        yield helper, np.random.randint(2,5), np.random.randint(2,5), 10
 
