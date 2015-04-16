@@ -1,6 +1,6 @@
 from __future__ import division
 import numpy as np
-import scipy.stats
+from scipy.stats import multivariate_normal
 
 from pylds.models import DefaultLDS
 
@@ -125,11 +125,12 @@ def same_loglike(model,_):
     sigma_x = np.linalg.inv(J)
     mu_y = bigC.dot(mu_x)
     sigma_y = bigC.dot(sigma_x).dot(bigC.T) + np.kron(np.eye(T),model.sigma_obs)
-    dense_loglike = scipy.stats.multivariate_normal.logpdf(data.ravel(),mean=mu_y,cov=sigma_y)
+    dense_loglike = multivariate_normal.logpdf(data.ravel(),mu_y,sigma_y)
 
     model_loglike = model.log_likelihood()
 
     assert np.isclose(dense_loglike, model_loglike)
+
 
 def random_model(n,p,T):
     data = np.random.randn(T,p)
