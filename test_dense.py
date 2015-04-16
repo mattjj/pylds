@@ -1,10 +1,7 @@
 from __future__ import division
 import numpy as np
 
-from pybasicbayes.distributions import Regression
-from autoregressive.distributions import AutoRegression
-
-from models import LDS, DefaultLDS
+from models import DefaultLDS
 
 np.random.seed(0)
 
@@ -101,6 +98,7 @@ def test_random():
         assert same_means(model,(J,h))
         assert same_marginal_covs(model,(J,h))
 
-    for _ in range(3):
-        yield helper, np.random.randint(2,5), np.random.randint(2,5), 10
+    for _ in range(5):
+        yield helper, np.random.randint(2,5), np.random.randint(2,5), \
+            np.random.randint(10,20)
 
