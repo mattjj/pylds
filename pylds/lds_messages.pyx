@@ -1,5 +1,5 @@
 # distutils: extra_compile_args = -O2 -w
-# distutils: language = c++
+# distutils: include_dirs = pylds/
 # cython: boundscheck = False, nonecheck = False, wraparound = False, cdivision = True
 
 import numpy as np

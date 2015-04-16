@@ -4,7 +4,7 @@ import numpy as np
 from Cython.Build import cythonize
 
 setup(
-    ext_modules=cythonize('**/*.pyx'),
+    ext_modules=cythonize('pylds/**/*.pyx'),
     include_dirs=[np.get_include(),],
 )
 
