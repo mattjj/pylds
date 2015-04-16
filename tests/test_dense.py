@@ -1,7 +1,8 @@
 from __future__ import division
 import numpy as np
+import scipy.stats
 
-from models import DefaultLDS
+from pylds.models import DefaultLDS
 
 np.random.seed(0)
 
@@ -70,27 +71,65 @@ def lds_to_dense_infoparams(model,data):
 ###########
 
 def same_means(model,(J,h)):
-    n,p,T = model.n, model.p, model.states_list[0].T
+    n, T = model.n, model.states_list[0].T
+
     dense_mu = np.linalg.solve(J,h).reshape((T,n))
+
+    model.E_step()
     model_mu = model.states_list[0].smoothed_mus
+
     assert np.allclose(dense_mu,model_mu)
 
 
 def same_marginal_covs(model,(J,h)):
-    n,p,T = model.n, model.p, model.states_list[0].T
+    n, T = model.n, model.states_list[0].T
+
     all_dense_sigmas = np.linalg.inv(J)
     dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n]
                              for k in range(T)])
+
+    model.E_step()
     model_sigmas = model.states_list[0].smoothed_sigmas
+
     assert np.allclose(dense_sigmas,model_sigmas)
 
 
-# def same_loglike(model,(J,h)):
-#     dense_loglike = -1./2*h.dot(np.linalg.solve(J,h)) \
-#         + 1./2*np.linalg.slogdet(J)[1] - J.shape[0]/2.*np.log(2*np.pi)
-#     model_loglike = model.log_likelihood()
-#     assert np.isclose(dense_loglike,model_loglike)
+def same_pairwise_secondmoments(model,(J,h)):
+    n, T = model.n, model.states_list[0].T
 
+    all_dense_sigmas = np.linalg.inv(J)
+    dense_mu = np.linalg.solve(J,h)
+    blockslices = [slice(k*n,(k+1)*n) for k in range(T)]
+    dense_Extp1_xtT = \
+        sum(all_dense_sigmas[tp1,t] + np.outer(dense_mu[tp1],dense_mu[t])
+            for tp1,t in zip(blockslices[1:],blockslices[:-1]))
+
+    model.E_step()
+    model_Extp1_xtT = model.states_list[0].E_dynamics_stats[1]
+
+    assert np.allclose(dense_Extp1_xtT,model_Extp1_xtT)
+
+
+def same_loglike(model,_):
+    # NOTE: ignore the posterior (J,h) passed in so we can use the more
+    # convenient prior info parameters
+    data = model.states_list[0].data
+    T = data.shape[0]
+
+    C, model.C = model.C, np.zeros_like(model.C)
+    J,h = lds_to_dense_infoparams(model,data)
+    model.C = C
+
+    bigC = np.kron(np.eye(T),C)
+    mu_x = np.linalg.solve(J,h)
+    sigma_x = np.linalg.inv(J)
+    mu_y = bigC.dot(mu_x)
+    sigma_y = bigC.dot(sigma_x).dot(bigC.T) + np.kron(np.eye(T),model.sigma_obs)
+    dense_loglike = scipy.stats.multivariate_normal.logpdf(data.ravel(),mean=mu_y,cov=sigma_y)
+
+    model_loglike = model.log_likelihood()
+
+    assert np.isclose(dense_loglike, model_loglike)
 
 def random_model(n,p,T):
     data = np.random.randn(T,p)
@@ -99,10 +138,7 @@ def random_model(n,p,T):
     model.C = np.random.randn(p,n)
 
     J,h = lds_to_dense_infoparams(model,data)
-    model.add_data(data).E_step()
-
-    assert J.shape[0] == J.shape[1] == model.n * model.states_list[0].T
-    assert h.shape[0] == J.shape[0]
+    model.add_data(data)
 
     return model, (J,h)
 
@@ -123,10 +159,12 @@ def test_marginals_covs():
         yield check_random_model, same_marginal_covs
 
 
-# def test_loglike():
-#     for _ in range(5):
-#         yield check_random_model, same_loglike
+def test_pairwise_secondmoments():
+    for _ in range(5):
+        yield check_random_model, same_pairwise_secondmoments
 
 
-# TODO test E-step, loglike
+def test_loglike():
+    for _ in range(5):
+        yield check_random_model, same_loglike
 
