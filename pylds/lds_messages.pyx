@@ -1,4 +1,4 @@
-k distutils: extra_compile_args = -O2 -w
+# distutils: extra_compile_args = -O2 -w
 # distutils: include_dirs = pylds/
 # cython: boundscheck = False, nonecheck = False, wraparound = False, cdivision = True
 
@@ -9,6 +9,8 @@ cimport numpy as np
 cimport cython
 from libc.math cimport log
 from numpy.math cimport INFINITY, PI
+
+from libc.stdio cimport printf  # TODO remove
 
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
@@ -275,6 +277,7 @@ cdef inline double condition_on(
         ll -= p/2. * log(2.*PI)
         for i in range(p):
             ll -= log(temp_pp[i,i])
+
         return ll
 
 
@@ -366,18 +369,18 @@ cdef inline void set_dynamics_stats(
 #################################
 
 def kalman_info_filter(
-    double[:,:] J_init, double h_init[:],
+    double[:,:] J_init, double[:] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
 
     # allocate temporaries and internals
-    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int T = J_node.shape[0], n = J_node.shape[1]
     cdef int t
 
     cdef double[:,:] J_predict = np.copy(J_init)
     cdef double[:] h_predict = np.copy(h_init)
 
-    cdef double[::1]   temp_n   = np.empty((p,), order='F')
+    cdef double[::1]   temp_n   = np.empty((n,), order='F')
     cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
     cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
 
@@ -419,11 +422,13 @@ cdef inline void info_condition_on(
             Jout[i,j] = J1[i,j] + J2[i,j]
 
 
-cdef inline double info_predict(
+# cdef inline double info_predict(
+def info_predict(
     double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J12, double[:,:] J22,
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
-    ) nogil:
+#    ) nogil:
+    ):
     cdef int n = J.shape[0]
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., lognorm = 0.
@@ -433,17 +438,18 @@ cdef inline double info_predict(
         for j in range(n):
             temp_nn[i,j] = J[i,j] + J11[i,j]
             Jpredict[i,j] = J22[i,j]
-            temp_nn2[j,i] = J12[i,j]  # NOTE: transpose for lapack call
+            temp_nn2[j,i] = J12[i,j]  # NOTE: copy to column major for lapack call
 
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
 
-    dtrtrs('L', 'N', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
+    dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
     dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
 
     dtrtrs('L', 'N', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
-    lognorm = (-1./2) * dnrm2(&n, &temp_n[0], &inc)**2
-    dtrtrs('L', 'T', 'N', &n, &inc &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+    lognorm = (1./2) * dnrm2(&n, &temp_n[0], &inc)**2
+    dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+
     dgemv('N', &n, &n, &neg1, &J12[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
 
     lognorm -= n/2. * log(2*PI)

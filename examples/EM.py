@@ -42,11 +42,11 @@ data, stateseq = truemodel.generate(2000)
 
 model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
 
-likes = []
-for _ in progprint_xrange(50):
-    model.EM_step()
-    likes.append(model.log_likelihood())
+# likes = []
+# for _ in progprint_xrange(50):
+#     model.EM_step()
+#     likes.append(model.log_likelihood())
 
-plt.plot(likes)
-plt.show()
+# plt.plot(likes)
+# plt.show()
 
