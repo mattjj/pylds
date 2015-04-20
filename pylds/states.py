@@ -85,14 +85,16 @@ class LDSStates(object):
     # generation
 
     def generate_states(self):
-        # TODO make a cython version
         T, n, p = self.T, self.n, self.p
 
         stateseq = self.stateseq = np.empty((T,n),dtype='double')
         stateseq[0] = np.random.multivariate_normal(self.mu_init, self.sigma_init)
+
+        chol = np.linalg.cholesky(self.sigma_states)
+        randseq = np.random.randn(T-1,n)
+
         for t in xrange(1,T):
-            stateseq[t] = np.random.multivariate_normal(
-                self.A.dot(stateseq[t-1]), self.sigma_states)
+            stateseq[t] = self.A.dot(stateseq[t-1]) + chol.dot(randseq[t-1])
 
         return stateseq
 
