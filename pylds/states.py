@@ -3,8 +3,7 @@ import numpy as np
 
 from pybasicbayes.util.general import AR_striding
 
-from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
-    kalman_info_filter
+from lds_messages_interface import kalman_filter, filter_and_sample, E_step
 
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,

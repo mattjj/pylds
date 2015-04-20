@@ -9,7 +9,7 @@ from autoregressive.distributions import AutoRegression
 
 from pylds.models import LDS, DefaultLDS
 
-np..seed(0)
+npr.seed(0)
 
 #########################
 #  set some parameters  #

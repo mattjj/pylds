@@ -399,7 +399,7 @@ def kalman_info_filter(
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
 
 
-def info_Estep(
+def info_E_step(
     double[:,:] J_init, double[:] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
@@ -413,15 +413,15 @@ def info_Estep(
 
     cdef double[:,:,::1] fwdfilt_Js = np.empty((T,n,n))
     cdef double[:,::1] fwdfilt_hs = np.empty((T,n))
-    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
-    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
 
     cdef double[::1]   temp_n   = np.empty((n,), order='F')
     cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
     cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
 
     # allocate output
-    cdef double[:,:,:] E 
+    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
+    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
+    cdef double[:,:,::1] ExxnT = np.empty((T-1,n,n))  # 'n' for next
     cdef double lognorm = 0.
 
     # run filter forwards
@@ -449,12 +449,19 @@ def info_Estep(
     np.add(J_init, bwdfilt_Js[0], out=bwdfilt_Js[0])
     np.add(h_init, bwdfilt_hs[0], out=bwdfilt_hs[0])
 
-    return lognorm, np.asarray(bwdfilt_Js), np.asarray(bwdfilt_hs)
+    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
+    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
+
+    return lognorm, np.asarray(bwdfilt_Js), np.asarray(bwdfilt_hs), np.asarray(ExxnT)
 
 
 ###########################
 #  information-form util  #
 ###########################
+
+    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
+    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
+
 
 cdef inline void info_condition_on(
     double[:,:] J1, double[:] h1,
