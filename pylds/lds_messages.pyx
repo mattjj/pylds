@@ -402,6 +402,60 @@ def kalman_info_filter(
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
 
 
+def kalman_info_smoother(
+    double[:,:] J_init, double[:] h_init,
+    double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
+    double[:,:,:] J_node, double[:,:] h_node):
+
+    # allocate temporaries and internals
+    cdef int T = J_node.shape[0], n = J_node.shape[1]
+    cdef int t
+
+    cdef double[:,:] J_predict = np.copy(J_init)
+    cdef double[:] h_predict = np.copy(h_init)
+
+    cdef double[:,:,::1] fwdfilt_Js = np.empty((T,n,n))
+    cdef double[:,::1] fwdfilt_hs = np.empty((T,n))
+
+    cdef double[::1]   temp_n   = np.empty((n,), order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
+    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
+
+    # allocate output
+    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
+    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
+    cdef double lognorm = 0.
+
+    # run filter forwards
+    for t in range(T):
+        info_condition_on(
+            J_predict, h_predict, J_node[t], h_node[t],
+            fwdfilt_Js[t], fwdfilt_hs[t])
+        lognorm += info_predict(
+            fwdfilt_Js[t], fwdfilt_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
+            J_predict, h_predict,
+            temp_n, temp_nn, temp_nn2)
+
+    # run filter backwards
+    J_predict[...] = 0.
+    h_predict[...] = 0.
+    for t in range(T-2,-1,-1):
+        info_condition_on(
+            J_predict, h_predict, J_node[t], h_node[t],
+            bwdfilt_Js[t], bwdfilt_hs[t])
+        info_predict(
+            bwdfilt_Js[t], bwdfilt_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
+            J_predict, h_predict,
+            temp_n, temp_nn, temp_nn2)
+    np.add(J_init, bwdfilt_Js[0], out=bwdfilt_Js[0])
+    np.add(h_init, bwdfilt_hs[0], out=bwdfilt_hs[0])
+
+    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
+    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
+
+    return lognorm, np.asarray(bwdfilt_Js), np.asarray(bwdfilt_hs)
+
+
 ###########################
 #  information-form util  #
 ###########################
