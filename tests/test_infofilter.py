@@ -49,3 +49,13 @@ def test_info_predict():
 
         yield check_info_predict, J, h, J11, J12, J22
 
+
+if __name__ == '__main__':
+    n = 10
+    J = rand_psd(n)
+    h = npr.randn(n)
+
+    bigJ = rand_psd(2*n)
+    J11, J12, J22 = map(np.copy,[bigJ[:n,:n], bigJ[:n,n:], bigJ[n:,n:]])
+
+

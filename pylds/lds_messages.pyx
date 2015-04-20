@@ -458,6 +458,7 @@ cdef inline double info_predict(
 
     return lognorm
 
+
 def info_predict_test(J,h,J11,J12,J22,Jpredict,hpredict):
     temp_n = np.zeros_like(h)
     temp_nn = np.zeros_like(J)
