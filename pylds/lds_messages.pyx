@@ -422,13 +422,11 @@ cdef inline void info_condition_on(
             Jout[i,j] = J1[i,j] + J2[i,j]
 
 
-# cdef inline double info_predict(
-def info_predict(
+cdef inline double info_predict(
     double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J12, double[:,:] J22,
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
-#    ) nogil:
-    ):
+   ) nogil:
     cdef int n = J.shape[0]
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., lognorm = 0.
@@ -444,7 +442,9 @@ def info_predict(
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
 
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
-    dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
+    # TODO this call aliases pointers, should really call dsyrk and copy lower to upper
+    dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
+    # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
 
     dtrtrs('L', 'N', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
     lognorm = (1./2) * dnrm2(&n, &temp_n[0], &inc)**2
@@ -457,4 +457,11 @@ def info_predict(
         lognorm -= log(temp_nn[i,i])
 
     return lognorm
+
+def info_predict_test(J,h,J11,J12,J22,Jpredict,hpredict):
+    temp_n = np.zeros_like(h)
+    temp_nn = np.zeros_like(J)
+    temp_nn2 = np.zeros_like(J)
+
+    return info_predict(J,h,J11,J12,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
 
