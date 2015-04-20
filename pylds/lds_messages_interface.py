@@ -7,7 +7,8 @@ from lds_messages import \
     kalman_filter as _kalman_filter, \
     rts_smoother as _rts_smoother, \
     filter_and_sample as _filter_and_sample, \
-    E_step as _E_step
+    E_step as _E_step, \
+    kalman_info_filter as _kalman_info_filter
 
 
 def _argcheck(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
@@ -37,4 +38,5 @@ kalman_filter = _wrap(_kalman_filter)
 rts_smoother = _wrap(_rts_smoother)
 filter_and_sample = _wrap(_filter_and_sample)
 E_step = _wrap(_E_step)
+kalman_info_filter = _wrap(_kalman_info_filter)
 

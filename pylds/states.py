@@ -3,9 +3,8 @@ import numpy as np
 
 from pybasicbayes.util.general import AR_striding
 
-from lds_messages_interface import kalman_filter, filter_and_sample, E_step
-from lds_messages_python import kf_resample_lds as filter_and_sample_python, \
-    kf as kalman_filter_python
+from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
+    kalman_info_filter
 
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,
@@ -106,24 +105,12 @@ class LDSStates(object):
             self.A, self.sigma_states, self.C, self.sigma_obs,
             self.data)
 
-    def filter_python(self):
-        self.filtered_mus, self.filtered_sigmas = kalman_filter_python(
-            self.mu_init, self.sigma_init,
-            [self.A]*self.T, [self.sigma_states]*self.T, [self.C]*self.T, [self.sigma_obs]*self.T,
-            self.data)
-
     # resampling
 
     def resample(self):
         self._normalizer, self.stateseq = filter_and_sample(
             self.mu_init, self.sigma_init,
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.data)
-
-    def resample_python(self):
-        self.stateseq = filter_and_sample_python(
-            self.mu_init, self.sigma_init,
-            [self.A]*self.T, [self.sigma_states]*self.T, [self.C]*self.T, [self.sigma_obs]*self.T,
             self.data)
 
     # E step

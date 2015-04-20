@@ -26,11 +26,8 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # slower due to struct passing overhead, but much prettier
 # NOTE: scipy doesn't expose a dtrsm binding
 
-# TODO diagonal plus low rank version
-# TODO try an Eigen version! faster for small matrices (numerically and in
-# function call overhead)
 # TODO cholesky update/downdate versions (square root filter)
-# TODO generate single-precision codepath?
+# TODO test info filter/smoother/Estep
 
 
 ##################################
@@ -402,7 +399,7 @@ def kalman_info_filter(
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
 
 
-def kalman_info_smoother(
+def info_Estep(
     double[:,:] J_init, double[:] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
@@ -416,14 +413,15 @@ def kalman_info_smoother(
 
     cdef double[:,:,::1] fwdfilt_Js = np.empty((T,n,n))
     cdef double[:,::1] fwdfilt_hs = np.empty((T,n))
+    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
+    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
 
     cdef double[::1]   temp_n   = np.empty((n,), order='F')
     cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
     cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
 
     # allocate output
-    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
-    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
+    cdef double[:,:,:] E 
     cdef double lognorm = 0.
 
     # run filter forwards
@@ -447,11 +445,9 @@ def kalman_info_smoother(
             bwdfilt_Js[t], bwdfilt_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
+        # TODO add to statistics
     np.add(J_init, bwdfilt_Js[0], out=bwdfilt_Js[0])
     np.add(h_init, bwdfilt_hs[0], out=bwdfilt_hs[0])
-
-    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
-    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
 
     return lognorm, np.asarray(bwdfilt_Js), np.asarray(bwdfilt_hs)
 
