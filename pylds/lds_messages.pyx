@@ -367,7 +367,7 @@ cdef inline void set_dynamics_stats(
 
 def kalman_info_filter(
     double[:,:] J_init, double[:] h_init,
-    double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
+    double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
 
     # allocate temporaries and internals
@@ -392,7 +392,7 @@ def kalman_info_filter(
             J_predict, h_predict, J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
-            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
+            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
 
@@ -401,7 +401,7 @@ def kalman_info_filter(
 
 def info_E_step(
     double[:,:] J_init, double[:] h_init,
-    double[:,:,:] J_pair_11, double[:,:,:] J_pair_12, double[:,:,:] J_pair_22,
+    double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
 
     # allocate temporaries and internals
@@ -430,7 +430,7 @@ def info_E_step(
             J_predict, h_predict, J_node[t], h_node[t],
             fwdfilt_Js[t], fwdfilt_hs[t])
         lognorm += info_predict(
-            fwdfilt_Js[t], fwdfilt_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
+            fwdfilt_Js[t], fwdfilt_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
 
@@ -442,7 +442,7 @@ def info_E_step(
             J_predict, h_predict, J_node[t], h_node[t],
             bwdfilt_Js[t], bwdfilt_hs[t])
         info_predict(
-            bwdfilt_Js[t], bwdfilt_hs[t], J_pair_11[t], J_pair_12[t], J_pair_22[t],
+            bwdfilt_Js[t], bwdfilt_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
         # TODO add to statistics
@@ -458,10 +458,6 @@ def info_E_step(
 ###########################
 #  information-form util  #
 ###########################
-
-    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
-    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
-
 
 cdef inline void info_condition_on(
     double[:,:] J1, double[:] h1,
@@ -480,7 +476,7 @@ cdef inline void info_condition_on(
 
 
 cdef inline double info_predict(
-    double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J12, double[:,:] J22,
+    double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J21, double[:,:] J22,
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
    ) nogil:
@@ -493,7 +489,7 @@ cdef inline double info_predict(
         for j in range(n):
             temp_nn[i,j] = J[i,j] + J11[i,j]
             Jpredict[i,j] = J22[i,j]
-            temp_nn2[j,i] = J12[i,j]  # NOTE: copy to column major for lapack call
+            temp_nn2[i,j] = J21[i,j]
 
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
@@ -507,7 +503,7 @@ cdef inline double info_predict(
     lognorm = (1./2) * dnrm2(&n, &temp_n[0], &inc)**2
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
 
-    dgemv('N', &n, &n, &neg1, &J12[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
+    dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
 
     lognorm -= n/2. * log(2*PI)
     for i in range(n):
@@ -516,10 +512,10 @@ cdef inline double info_predict(
     return lognorm
 
 
-def info_predict_test(J,h,J11,J12,J22,Jpredict,hpredict):
+def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
     temp_n = np.zeros_like(h)
     temp_nn = np.zeros_like(J)
     temp_nn2 = np.zeros_like(J)
 
-    return info_predict(J,h,J11,J12,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
+    return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
 

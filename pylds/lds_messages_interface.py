@@ -54,13 +54,13 @@ E_step = _wrap(_E_step,_argcheck)
 #     info_E_step as _info_E_step
 
 
-def _info_argcheck(J_init, h_init, J_pair_11, J_pair_12, J_pair_22, J_node, h_node):
+def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node):
     T = h_node.shape[0]
-    J_pair_11, J_pair_12, J_pair_22, J_node = \
+    J_pair_11, J_pair_21, J_pair_22, J_node = \
         map(partial(_ensure_ndim, T=T, ndim=3),
-            [J_pair_11, J_pair_12, J_pair_22, J_node])
+            [J_pair_11, J_pair_21, J_pair_22, J_node])
     h_node = np.require(h_node, dtype=np.float64, requirements='C')
-    return J_init, h_init, J_pair_11, J_pair_12, J_pair_22, J_node, h_node
+    return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
 
 
 # info_E_step = _wrap(_info_E_step, _info_argcheck)
