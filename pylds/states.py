@@ -6,6 +6,7 @@ from pybasicbayes.util.general import AR_striding
 from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
     info_E_step
 
+
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,
             generate=True,initialize_from_prior=False,initialize_to_noise=True):
@@ -26,7 +27,7 @@ class LDSStates(object):
                 else:
                     self.stateseq = np.random.normal(size=(self.T,self.n))
 
-    ### model properties
+    # model properties
 
     @property
     def emission_distn(self):
@@ -130,7 +131,7 @@ class LDSStates(object):
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
 
-        EyyT = np.einsum('ti,tj->ij',self.data,self.data)  # TODO don't redo
+        EyyT = np.einsum('ti,tj->ij',self.data,self.data)  # TODO repetitive
         EyxT = np.einsum('ti,tj->ij',self.data,smoothed_mus)
         ExxT = smoothed_sigmas.sum(0) + \
             np.einsum('ti,tj->ij',smoothed_mus,smoothed_mus)

@@ -403,6 +403,7 @@ def info_E_step(
     double[:,:] J_init, double[:] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
+    # NOTE: uses two-filter strategy
 
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
@@ -411,48 +412,43 @@ def info_E_step(
     cdef double[:,:] J_predict = np.copy(J_init)
     cdef double[:] h_predict = np.copy(h_init)
 
-    cdef double[:,:,::1] fwdfilt_Js = np.empty((T,n,n))
-    cdef double[:,::1] fwdfilt_hs = np.empty((T,n))
+    cdef double[:,:,::1] filtered_Js = np.empty((T,n,n))
+    cdef double[:,::1] filtered_hs = np.empty((T,n))
+    cdef double[:,:,::1] predict_Js = np.empty((T,n,n))
+    cdef double[:,::1] predict_hs = np.empty((T,n))
 
     cdef double[::1]   temp_n   = np.empty((n,), order='F')
     cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
     cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
 
     # allocate output
-    cdef double[:,:,::1] bwdfilt_Js = np.empty((T,n,n))
-    cdef double[:,::1] bwdfilt_hs = np.empty((T,n))
+    cdef double[:,::1] smoothed_mus = np.empty((T,n))
+    cdef double[:,:,::1] smoothed_sigmas = np.empty((T,n,n))
     cdef double[:,:,::1] ExxnT = np.empty((T-1,n,n))  # 'n' for next
     cdef double lognorm = 0.
 
     # run filter forwards
+    predict_Js[0] = np.copy(J_init)
+    predict_hs[0] = np.copy(h_init)
     for t in range(T):
         info_condition_on(
-            J_predict, h_predict, J_node[t], h_node[t],
-            fwdfilt_Js[t], fwdfilt_hs[t])
+            predict_Js[t], predict_hs[t], J_node[t], h_node[t],
+            filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
-            fwdfilt_Js[t], fwdfilt_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            J_predict, h_predict,
+            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
 
-    # run filter backwards
-    J_predict[...] = 0.
-    h_predict[...] = 0.
+    # run info-form rts update backwards
     for t in range(T-2,-1,-1):
-        info_condition_on(
-            J_predict, h_predict, J_node[t], h_node[t],
-            bwdfilt_Js[t], bwdfilt_hs[t])
-        info_predict(
-            bwdfilt_Js[t], bwdfilt_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            J_predict, h_predict,
+        info_rts_backward_step(
+            J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],
+            predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],
+            smoothed_mus[t], smoothed_sigmas[t], ExxnT[t],
             temp_n, temp_nn, temp_nn2)
-        # TODO add to statistics
-    np.add(J_init, bwdfilt_Js[0], out=bwdfilt_Js[0])
-    np.add(h_init, bwdfilt_hs[0], out=bwdfilt_hs[0])
 
-    np.add(fwdfilt_Js, bwdfilt_Js, out=bwdfilt_Js)
-    np.add(fwdfilt_hs, bwdfilt_hs, out=bwdfilt_hs)
-
-    return lognorm, np.asarray(bwdfilt_Js), np.asarray(bwdfilt_hs), np.asarray(ExxnT)
+    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(ExxnT)
 
 
 ###########################
@@ -518,4 +514,14 @@ def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
     temp_nn2 = np.zeros_like(J)
 
     return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
+
+
+cdef inline void info_rts_backward_step(
+    double[:,:] J11, double[:,:] J21, double[:,:] J22,  # inputs
+    double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # J_filt_t is mutated!
+    double[:] hpred_tp1, double[:] hfilt_t, double[:] hsmooth_tp1,  # h_filt_t is mutated!
+    double[:] smoothed_mu_t, double[:,:] smoothed_sigma_t, double[:,:] ExxnT,  # outputs
+    double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,  # temps
+    ) nogil:
+    pass  # TODO
 

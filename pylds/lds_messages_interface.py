@@ -50,8 +50,8 @@ E_step = _wrap(_E_step,_argcheck)
 #  information-form wrappers  #
 ###############################
 
-# from lds_messages import \
-#     info_E_step as _info_E_step
+from lds_messages import \
+    info_E_step as _info_E_step
 
 
 def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node):
@@ -63,6 +63,6 @@ def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_no
     return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
 
 
-# info_E_step = _wrap(_info_E_step, _info_argcheck)
+info_E_step = _wrap(_info_E_step, _info_argcheck)
 
 
