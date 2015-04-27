@@ -239,11 +239,6 @@ from autoregressive.distributions import AutoRegression
 
 
 def DefaultLDS(n,p):
-    # model = NonstationaryLDS(
-    #     init_dynamics_distn=Gaussian(nu_0=n+1,sigma_0=n*np.eye(n),mu_0=np.zeros(n),kappa_0=1.),
-    #     dynamics_distn=AutoRegression(nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
-    #     emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
-
     model = LDS(
         dynamics_distn=AutoRegression(nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
         emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
