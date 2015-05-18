@@ -508,14 +508,6 @@ cdef inline double info_predict(
     return lognorm
 
 
-def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
-    temp_n = np.zeros_like(h)
-    temp_nn = np.zeros_like(J)
-    temp_nn2 = np.zeros_like(J)
-
-    return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
-
-
 cdef inline void info_rts_backward_step(
     double[:,:] J11, double[:,:] J21, double[:,:] J22,  # inputs
     double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # J_filt_t is mutated!
