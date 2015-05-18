@@ -24,7 +24,7 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # slower due to struct passing overhead, but much prettier
 # NOTE: scipy doesn't expose a dtrsm binding
 
-# TODO nonstationary versions
+# TODO diagonal plus low rank version
 # TODO try an Eigen version! faster for small matrices (numerically and in
 # function call overhead)
 # TODO use info form when p > n
