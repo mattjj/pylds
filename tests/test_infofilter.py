@@ -159,3 +159,9 @@ def test_info_rts():
         n = randint(1,5)
         yield check_info_rts, generate_potentials(n)
 
+
+####################################
+#  test against distribution form  #
+####################################
+
+
