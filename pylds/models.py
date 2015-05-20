@@ -3,7 +3,8 @@ import numpy as np
 
 import pydare
 
-from pybasicbayes.abstractions import Model, ModelGibbsSampling, ModelEM
+from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
+    ModelEM, ModelMeanField
 
 from states import LDSStates
 
@@ -142,6 +143,44 @@ class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
     def resample_emission_distn(self):
         self.emission_distn.resample(
             [np.hstack((s.stateseq,s.data)) for s in self.states_list])
+
+
+class _LDSMeanField(_LDSBase,ModelMeanField):
+    def meanfield_coordinate_descent_step(self):
+        self._meanfield_update_sweep()
+        return self._vlb()
+
+    def _meanfield_update_sweep(self):
+        for s in self.states_list:
+            if not hasattr(s,'E_emission_stats'):
+                s.meanfieldupdate()
+        self.meanfield_update_parameters()
+        self.meanfield_update_states()
+
+    def meanfield_update_states(self):
+        for s in self.states_list:
+            s.meanfieldupdate()
+
+    def meanfield_udpate_parameters(self):
+        self.meanfield_udpate_dynamics_distn()
+        self.meanfield_update_emission_distn()
+
+    def meanfield_update_dynamics_distn(self):
+        self.dynamics_distn.meanfieldupdate(
+            data=None,
+            stats=(sum(s.E_dynamics_stats for s in self.states_list)))
+
+    def meanfield_update_emission_distn(self):
+        self.emission_distn.meanfieldupdate(
+            data=None,
+            stats=(sum(s.E_emission_stats for s in self.states_list)))
+
+    def _vlb(self):
+        vlb = 0.
+        vlb += sum(s.get_vlb() for s in self.states_list)
+        vlb += self.emission_distn.get_vlb()
+        vlb += self.dynamics_distn.get_vlb()
+        return vlb
 
 
 class _NonstationaryLDSGibbsSampling(_LDSGibbsSampling):

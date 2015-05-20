@@ -27,55 +27,10 @@ class LDSStates(object):
                 else:
                     self.stateseq = np.random.normal(size=(self.T,self.n))
 
-    # model properties
-
-    @property
-    def emission_distn(self):
-        return self.model.emission_distn
-
-    @property
-    def dynamics_distn(self):
-        return self.model.dynamics_distn
-
-    @property
-    def mu_init(self):
-        return self.model.mu_init
-
-    @property
-    def sigma_init(self):
-        return self.model.sigma_init
-
-    @property
-    def n(self):
-        return self.model.n
-
-    @property
-    def p(self):
-        return self.model.p
-
-    @property
-    def A(self):
-        return self.model.A
-
-    @property
-    def sigma_states(self):
-        return self.model.sigma_states
-
-    @property
-    def C(self):
-        return self.model.C
-
-    @property
-    def sigma_obs(self):
-        return self.model.sigma_obs
-
-    @property
-    def strided_stateseq(self):
-        return AR_striding(self.stateseq,1)
+    # basics
 
     def log_likelihood(self):
-        # TODO handle caching and stuff
-        if True or self._normalizer is None:
+        if self._normalizer is None:
             self._normalizer, _, _ = kalman_filter(
                 self.mu_init, self.sigma_init,
                 self.A, self.sigma_states, self.C, self.sigma_obs,
@@ -173,7 +128,53 @@ class LDSStates(object):
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     def get_vlb(self):
-        if self._normalizer is None:
+        if hasattr(self,'_normalizer'):
             self.meanfieldupdate()  # NOTE: sets self._normalizer
         return self._normalizer
+
+    # model properties
+
+    @property
+    def emission_distn(self):
+        return self.model.emission_distn
+
+    @property
+    def dynamics_distn(self):
+        return self.model.dynamics_distn
+
+    @property
+    def mu_init(self):
+        return self.model.mu_init
+
+    @property
+    def sigma_init(self):
+        return self.model.sigma_init
+
+    @property
+    def n(self):
+        return self.model.n
+
+    @property
+    def p(self):
+        return self.model.p
+
+    @property
+    def A(self):
+        return self.model.A
+
+    @property
+    def sigma_states(self):
+        return self.model.sigma_states
+
+    @property
+    def C(self):
+        return self.model.C
+
+    @property
+    def sigma_obs(self):
+        return self.model.sigma_obs
+
+    @property
+    def strided_stateseq(self):
+        return AR_striding(self.stateseq,1)
 
