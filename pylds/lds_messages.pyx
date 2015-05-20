@@ -531,29 +531,21 @@ cdef inline void info_rts_backward_step(
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1.
 
-    # temp_nn = Jsmooth_tp1 - Jpred_tp1 = Jt|t:
     dcopy(&nn, &Jsmooth_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &neg1, &Jpred_tp1[0,0], &inc, &temp_nn[0,0], &inc)
-    # temp_nn = Jt|t: + Sigma^{-1}
     daxpy(&nn, &one, &J22[0,0], &inc, &temp_nn[0,0], &inc)
-    # temp_nn = chol(J22)
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
 
-    # temp_nn2 = temp_nn^{-1} J21 (transpose because we want Fortran order)
     copy_transpose(J21, temp_nn2)
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
-    # Jfilt_t = Jfilt_t + A' Sigma^{-1} A - temp_nn2' temp_nn2 = Jsmooth_t
     daxpy(&nn, &one, &J11[0,0], &inc, &Jfilt_t[0,0], &inc)
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jfilt_t[0,0], &n)
 
-    # hfilt_t = hfilt_t - J12 J22^{-1} (hsmooth_tp1 - hpred_tp1) = hsmooth_t
     dcopy(&n, &hsmooth_tp1[0], &inc, &temp_n[0], &inc)
     daxpy(&n, &neg1, &hpred_tp1[0], &inc, &temp_n[0], &inc)
     dpotrs('L', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
     dgemv('N', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hfilt_t[0], &inc)
 
-    # sigma_t = Jsmooth_t^{-1}
-    # mu_t = Jsmooth_t^{-1} hsmooth_t
     dcopy(&nn, &Jfilt_t[0,0], &inc, &sigma_t[0,0], &inc)
     dpotrf('L', &n, &sigma_t[0,0], &n, &info)
     dcopy(&n, &hfilt_t[0], &inc, &mu_t[0], &inc)
@@ -561,7 +553,6 @@ cdef inline void info_rts_backward_step(
     dpotri('L', &n, &sigma_t[0,0], &n, &info)
     copy_upper_lower(sigma_t)
 
-    # ExxnT = -J22^{-1} J21 sigma_t
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &Cov_xnx[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &Cov_xnx[0,0], &n, &info)
 
