@@ -14,7 +14,7 @@ from libc.stdio cimport printf  # TODO remove
 
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
-        dger, dnrm2
+        dger, dnrm2, dpotri, copy_transpose
 
 # NOTE: because the matrix operations are done in Fortran order but the code
 # expects C ordered arrays as input, the BLAS and LAPACK function calls mark
@@ -250,7 +250,7 @@ cdef inline double condition_on(
         return 0.
     else:
         # NOTE: the C arguments are treated as transposed because C is
-        # assumed to be in C order
+        # assumed to be in C order (row-major order)
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
         dcopy(&pp, &sigma_obs[0,0], &inc, &temp_pp[0,0], &inc)
         dgemm('N', 'N', &p, &p, &n, &one, &temp_pn[0,0], &p, &C[0,0], &n, &one, &temp_pp[0,0], &p)
@@ -440,11 +440,12 @@ def info_E_step(
             temp_n, temp_nn, temp_nn2)
 
     # run info-form rts update backwards
+    # overwriting the filtered params with smoothed ones
     for t in range(T-2,-1,-1):
         info_rts_backward_step(
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],
-            predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],
+            predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],  # filtered_Js[t] is mutated
+            predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],  # filtered_hs[t] is mutated
             smoothed_mus[t], smoothed_sigmas[t], ExxnT[t],
             temp_n, temp_nn, temp_nn2)
 
@@ -476,11 +477,14 @@ cdef inline double info_predict(
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
    ) nogil:
+
+    # NOTE: J21 is in C-major order, so BLAS and LAPACK function calls mark it as
+    # transposed
+
     cdef int n = J.shape[0]
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., lognorm = 0.
     cdef int i, j
-
     for i in range(n):
         for j in range(n):
             temp_nn[i,j] = J[i,j] + J11[i,j]
@@ -499,6 +503,7 @@ cdef inline double info_predict(
     lognorm = (1./2) * dnrm2(&n, &temp_n[0], &inc)**2
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
 
+    # NOTE: transpose because J21 is in C-major order
     dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
 
     lognorm -= n/2. * log(2*PI)
@@ -510,10 +515,52 @@ cdef inline double info_predict(
 
 cdef inline void info_rts_backward_step(
     double[:,:] J11, double[:,:] J21, double[:,:] J22,  # inputs
-    double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # J_filt_t is mutated!
-    double[:] hpred_tp1, double[:] hfilt_t, double[:] hsmooth_tp1,  # h_filt_t is mutated!
-    double[:] smoothed_mu_t, double[:,:] smoothed_sigma_t, double[:,:] ExxnT,  # outputs
+    double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # Jfilt_t is mutated!
+    double[:] hpred_tp1, double[:] hfilt_t, double[:] hsmooth_tp1,  # hfilt_t is mutated!
+    double[:] mu_t, double[:,:] sigma_t, double[:,:] ExxnT,  # outputs
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,  # temps
     ) nogil:
-    pass  # TODO
+
+   # NOTE: this function mutates Jfilt_t and hfilt_t to be Jsmooth_t and
+   # hsmooth_t, respectively
+   # NOTE: J21 is in C-major order, so BLAS and LAPACK function calls mark it as
+   # transposed
+
+   cdef int n = J11.shape[0]
+   cdef int nn = n*n
+   cdef int inc = 1, info = 0
+   cdef double one = 1., zero = 0., neg1 = -1.
+
+   # temp_nn = Jsmooth_tp1 - Jpred_tp1 = Jt|t:
+   dcopy(&nn, &Jsmooth_tp1[0,0], &inc, &temp_nn[0,0], &inc)
+   daxpy(&nn, &neg1, &Jpred_tp1[0,0], &inc, &temp_nn[0,0], &inc)
+   # temp_nn = Jt|t: + Sigma^{-1}
+   daxpy(&nn, &one, &J22[0,0], &inc, &temp_nn[0,0], &inc)
+   # temp_nn = chol(J22)
+   dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+
+   # temp_nn2 = temp_nn^{-1} J21 (transpose because we want Fortran order)
+   copy_transpose(J21, temp_nn2)
+   dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
+   # Jfilt_t = Jfilt_t + A' Sigma^{-1} A - temp_nn2' temp_nn2 = Jsmooth_t
+   daxpy(&nn, &one, &J11[0,0], &inc, &Jfilt_t[0,0], &inc)
+   dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jfilt_t[0,0], &n)
+
+   # hfilt_t = hfilt_t - J12 J22^{-1} (hsmooth_tp1 - hpred_tp1) = hsmooth_t
+   dcopy(&n, &hsmooth_tp1[0], &inc, &temp_n[0], &inc)
+   daxpy(&n, &neg1, &hpred_tp1[0], &inc, &temp_n[0], &inc)
+   dpotrs('L', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+   dgemv('N', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hfilt_t[0], &inc)
+
+   # sigma_t = Jsmooth_t^{-1}
+   # mu_t = Jsmooth_t^{-1} hsmooth_t
+   dcopy(&nn, &Jfilt_t[0,0], &inc, &sigma_t[0,0], &inc)
+   dpotrf('L', &n, &sigma_t[0,0], &n, &info)
+   dcopy(&n, &hfilt_t[0], &inc, &mu_t[0], &inc)
+   dpotrs('L', &n, &inc, &sigma_t[0,0], &n, &mu_t[0], &n, &info)
+   dpotri('L', &n, &sigma_t[0,0], &n, &info)
+
+   # ExxnT = -J22^{-1} J21 sigma_t
+   dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &ExxnT[0,0], &n)
+   dpotrs('L', &n, &n, &temp_nn[0,0], &n, &ExxnT[0,0], &n, &info)
 
