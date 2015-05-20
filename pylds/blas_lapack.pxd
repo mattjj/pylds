@@ -244,3 +244,10 @@ cdef inline void copy_transpose(floating[:,:] x, floating[:,:] y) nogil:
         for j in range(n):
             y[i,j] = x[j,i]
 
+cdef inline void copy_upper_lower(floating[:,:] x) nogil:
+    cdef int n = x.shape[0]
+    cdef int i, j
+    for i in range(n):
+        for j in range(i):
+            x[i,j] = x[j,i]
+
