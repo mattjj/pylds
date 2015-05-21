@@ -10,8 +10,6 @@ cimport cython
 from libc.math cimport log
 from numpy.math cimport INFINITY, PI
 
-from libc.stdio cimport printf  # TODO remove
-
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
         dger, dnrm2, dpotri, copy_transpose, copy_upper_lower
@@ -27,7 +25,8 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # NOTE: scipy doesn't expose a dtrsm binding
 
 # TODO cholesky update/downdate versions (square root filter)
-# TODO test info filter/smoother/Estep
+# TODO test info smoother/Estep
+# TODO factor out filter routines (for parallelism and deduplication)
 
 
 ##################################
@@ -370,6 +369,8 @@ def kalman_info_filter(
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
 
+    # NOTE: returned lognorm does not include base measure terms
+
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
     cdef int t
@@ -387,7 +388,7 @@ def kalman_info_filter(
     cdef double lognorm = 0.
 
     # run filter forwards
-    for t in range(T):
+    for t in range(T-1):
         info_condition_on(
             J_predict, h_predict, J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
@@ -395,6 +396,11 @@ def kalman_info_filter(
             filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
+    info_condition_on(
+        J_predict, h_predict, J_node[T-1], h_node[T-1],
+        filtered_Js[T-1], filtered_hs[T-1])
+    lognorm += info_lognorm_copy(
+        filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
 
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
 
@@ -430,7 +436,7 @@ def info_E_step(
     # run filter forwards
     predict_Js[0] = np.copy(J_init)
     predict_hs[0] = np.copy(h_init)
-    for t in range(T):
+    for t in range(T-1):
         info_condition_on(
             predict_Js[t], predict_hs[t], J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
@@ -438,6 +444,12 @@ def info_E_step(
             filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
+    info_condition_on(
+        J_predict, h_predict, J_node[T-1], h_node[T-1],
+        filtered_Js[T-1], filtered_hs[T-1])
+    lognorm -= info_lognorm_copy(
+        filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
+    lognorm += n/2. * log(2*PI)
 
     # run info-form rts update backwards
     # overwriting the filtered params with smoothed ones
@@ -472,6 +484,38 @@ cdef inline void info_condition_on(
             Jout[i,j] = J1[i,j] + J2[i,j]
 
 
+cdef inline double info_lognorm(double[:,:] J, double[:] h) nogil:
+    # NOTE: mutates input to chol(J) and solve_triangular(chol(J),h), resp.
+
+    cdef int n = J.shape[0]
+    cdef int nn = n*n
+    cdef int inc = 1, info = 0
+    cdef double lognorm = 0.
+
+    dpotrf('L', &n, &J[0,0], &n, &info)
+    dtrtrs('L', 'N', 'N', &n, &inc, &J[0,0], &n, &h[0], &n, &info)
+
+    lognorm += (1./2) * dnrm2(&n, &h[0], &inc)**2
+    for i in range(n):
+        lognorm -= log(J[i,i])
+    lognorm += n/2. * log(2*PI)
+
+    return lognorm
+
+
+cdef inline double info_lognorm_copy(
+    double[:,:] J, double[:] h,
+    double[:] temp_n, double[:,:] temp_nn,
+    ) nogil:
+    cdef int n = J.shape[0]
+    cdef int nn = n*n, inc = 1
+
+    dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
+    dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
+
+    return info_lognorm(temp_nn, temp_n)
+
+
 cdef inline double info_predict(
     double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J21, double[:,:] J22,
     double[:,:] Jpredict, double[:] hpredict,
@@ -482,33 +526,25 @@ cdef inline double info_predict(
     # transposed
 
     cdef int n = J.shape[0]
+    cdef int nn = n*n
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., lognorm = 0.
-    cdef int i, j
-    for i in range(n):
-        for j in range(n):
-            temp_nn[i,j] = J[i,j] + J11[i,j]
-            Jpredict[i,j] = J22[i,j]
-            temp_nn2[i,j] = J21[i,j]
 
+    dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
+    daxpy(&nn, &one, &J11[0,0], &inc, &temp_nn[0,0], &inc)
+    dcopy(&nn, &J22[0,0], &inc, &Jpredict[0,0], &inc)
+    dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
-    dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+
+    lognorm += info_lognorm(temp_nn, temp_n)  # mutates temp_n and temp_nn
+    dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+    # NOTE: transpose because J21 is in C-major order
+    dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
 
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
     # TODO this call aliases pointers, should really call dsyrk and copy lower to upper
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
     # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
-
-    dtrtrs('L', 'N', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
-    lognorm = (1./2) * dnrm2(&n, &temp_n[0], &inc)**2
-    dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
-
-    # NOTE: transpose because J21 is in C-major order
-    dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
-
-    lognorm -= n/2. * log(2*PI)
-    for i in range(n):
-        lognorm -= log(temp_nn[i,i])
 
     return lognorm
 
@@ -560,9 +596,9 @@ cdef inline void info_rts_backward_step(
 ### testing
 
 def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
-    temp_n = np.zeros_like(h)
-    temp_nn = np.zeros_like(J)
-    temp_nn2 = np.zeros_like(J)
+    temp_n = np.random.randn(*h.shape)
+    temp_nn = np.random.randn(*J.shape)
+    temp_nn2 = np.random.randn(*J.shape)
 
     return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
 
