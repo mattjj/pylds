@@ -2,6 +2,7 @@ from __future__ import division
 import numpy as np
 from numpy.random import randn, randint
 
+from pylds.lds_messages_interface import kalman_filter, kalman_info_filter
 from pylds.lds_messages import info_predict_test, info_rts_test
 
 
@@ -45,6 +46,10 @@ def mean_to_info(mu,Sigma):
     J = np.linalg.inv(Sigma)
     h = np.linalg.solve(Sigma,mu)
     return J, h
+
+
+def spectral_radius(A):
+    return max(np.linalg.eigvals(A), key=np.abs)
 
 
 ##########################
@@ -164,4 +169,67 @@ def test_info_rts():
 #  test against distribution form  #
 ####################################
 
+def check_filters(A, B, C, D, mu_init, sigma_init, data):
+    def info_params(A, B, C, D, data):
+        J_init = np.linalg.inv(sigma_init)
+        h_init = np.linalg.solve(sigma_init, mu_init)
+
+        BBT = B.dot(B.T)
+        J_pair_11 = A.T.dot(np.linalg.solve(BBT,A))
+        J_pair_21 = np.linalg.solve(BBT,A)
+        J_pair_22 = np.linalg.inv(BBT)
+
+        DDT = D.dot(D.T)
+        J_node = C.T.dot(np.linalg.solve(DDT,C))
+        h_node = np.einsum('ki,ij,tj->tk',C,np.linalg.inv(DDT),data)
+
+        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, \
+            J_node, h_node
+
+    ll, filtered_mus, filtered_sigmas = kalman_filter(
+        mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
+    ll2, filtered_Js, filtered_hs = kalman_info_filter(*info_params(A,B,C,D,data))
+    filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
+    filtered_sigmas2 = [np.linalg.inv(J) for J in filtered_Js]
+
+    assert np.isclose(ll, ll2)
+    assert all(np.allclose(mu1, mu2)
+               for mu1, mu2 in zip(filtered_mus, filtered_mus2))
+    assert all(np.allclose(s1, s2)
+               for s1, s2 in zip(filtered_sigmas, filtered_sigmas2))
+
+
+def test_info_loglike():
+    def generate_model(n, p):
+        A = randn(n,n)
+        A /= 2.*spectral_radius(A)  # ensures stability
+        B = rand_psd(n)
+        C = randn(p,n)
+        D = rand_psd(p)
+
+        mu_init = randn(n)
+        sigma_init = rand_psd(n)
+
+        return A, B, C, D, mu_init, sigma_init
+
+    def generate_data(A, B, C, D, mu_init, sigma_init, T):
+        p, n = C.shape
+        x = np.zeros((T+1,n))
+        out = np.zeros((T,p))
+
+        staterandseq = randn(T,n)
+        emissionrandseq = randn(T,p)
+
+        x[0] = np.random.multivariate_normal(mu_init,sigma_init)
+        for t in xrange(T):
+            x[t+1] = A.dot(x[t]) + B.dot(staterandseq[t])
+            out[t] = C.dot(x[t]) + D.dot(emissionrandseq[t])
+
+        return out
+
+    for _ in xrange(5):
+        n, p, T = randint(1,5), randint(1,5), randint(10,20)
+        model = generate_model(n,p)
+        data = generate_data(*(model + (T,)))
+        yield (check_filters,) + model + (data,)
 
