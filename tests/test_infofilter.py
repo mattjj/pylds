@@ -2,7 +2,8 @@ from __future__ import division
 import numpy as np
 from numpy.random import randn, randint
 
-from pylds.lds_messages_interface import kalman_filter, kalman_info_filter
+from pylds.lds_messages_interface import kalman_filter, kalman_info_filter, \
+    E_step, info_E_step
 from pylds.lds_messages import info_predict_test, info_rts_test
 
 
@@ -207,14 +208,17 @@ def py_info_rts(
     htp1_future = hsmooth_tp1 - hpred_tp1
     bigJ = blockarray([[J11, J21.T], [J21, J22]]) + blockdiag([Jfilt_t, Jtp1_future])
     bigh = np.concatenate([hfilt_t, htp1_future])
-    Sigma = np.linalg.inv(bigJ)
-    mu = np.linalg.solve(bigJ,bigh)
+    mu, Sigma = info_to_mean(bigJ, bigh)
     return mu[:n], Sigma[:n,:n], Sigma[:n,n:]
 
 
-def check_info_rts(potentials):
+def check_info_rts_step(potentials, (mu, Sigma, Cov_xnx)):
     py_mu, py_sigma, py_Covxnx = py_info_rts(*potentials)
     cy_mu, cy_sigma, cy_Covxnx = cy_info_rts(*potentials)
+
+    assert np.allclose(mu,py_mu)
+    assert np.allclose(Sigma,py_sigma)
+    assert np.allclose(Cov_xnx,py_Covxnx)
 
     assert np.allclose(py_mu,cy_mu)
     assert np.allclose(py_sigma,cy_sigma)
@@ -229,7 +233,7 @@ def test_info_rts_step():
         Jnode1, Jnode2 = rand_psd(n), rand_psd(n)
         hnode1, hnode2 = randn(n), randn(n)
 
-        Jfilt_t = J11 + Jnode1
+        Jfilt_t = Jnode1
         hfilt_t = hnode1
 
         Jtemp = bigJ + blockdiag([Jnode1, np.zeros((n,n))])
@@ -242,12 +246,17 @@ def test_info_rts_step():
         mu, Sigma = info_to_mean(Jtemp, htemp)
         Jsmooth_tp1, hsmooth_tp1 = mean_to_info(mu[n:], Sigma[n:,n:])
 
-        return J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, \
+        potentials = J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, \
             hfilt_t, hsmooth_tp1
+        answers = mu[:n], Sigma[:n,:n], Sigma[:n,n:]
+
+        return potentials, answers
 
     for _ in xrange(5):
-        n = randint(1,5)
-        yield check_info_rts, generate_potentials(n)
+        # n = randint(1,5)
+        n = 2  # TODO put back
+        potentials, answers = generate_potentials(n)
+        yield check_info_rts_step, potentials, answers
 
 
 ####################################
@@ -300,11 +309,6 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     assert np.isclose(ll, ll2)
 
 
-# def check_info_rts(A, B, C, D, mu_init, sigma_init, data):
-#     # TODO
-#     pass
-
-
 def test_info_filter():
     for _ in xrange(5):
         n, p, T = randint(1,5), randint(1,5), randint(10,20)
@@ -313,10 +317,28 @@ def test_info_filter():
         yield (check_filters,) + model + (data,)
 
 
-# def test_info_rts():
-#     for _ in xrange(5):
-#         n, p, T = randint(1,5), randint(1,5), randint(10,20)
-#         model = generate_model(n,p)
-#         data = generate_data(*(model + (T,)))
-#         yield (check_info_rts,) + model + (data,)
+def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
+    _, smoothed_mus, smoothed_sigmas, _ = E_step(
+        mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
+    _, smoothed_mus2, smoothed_sigmas2, _ = info_E_step(
+        *info_params(A, B, C, D, mu_init, sigma_init, data))
+
+    # TODO fails here
+
+    assert all(np.allclose(mu1,mu2)
+               for mu1, mu2 in zip(smoothed_mus, smoothed_mus2))
+    assert all(np.allclose(s1, s2)
+               for s1, s2 in zip(smoothed_sigmas, smoothed_sigmas2))
+
+    # TODO check cross terms
+    # TODO check likelihood
+
+
+def test_info_Estep():
+    for _ in xrange(1):
+        # n, p, T = randint(1,5), randint(1,5), randint(10,20)
+        n, p, T = 2, 2, 3  # TODO put back
+        model = generate_model(n,p)
+        data = generate_data(*(model + (T,)))
+        yield (check_info_Estep,) + model + (data,)
 

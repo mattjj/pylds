@@ -369,8 +369,6 @@ def kalman_info_filter(
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
 
-    # NOTE: returned lognorm does not include base measure terms
-
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
     cdef int t
@@ -406,7 +404,7 @@ def kalman_info_filter(
 
 
 def info_E_step(
-    double[:,:] J_init, double[:] h_init,
+    double[:,::1] J_init, double[::1] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
     # NOTE: uses two-filter strategy
@@ -414,9 +412,6 @@ def info_E_step(
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
     cdef int t
-
-    cdef double[:,:] J_predict = np.copy(J_init)
-    cdef double[:] h_predict = np.copy(h_init)
 
     cdef double[:,:,::1] filtered_Js = np.empty((T,n,n))
     cdef double[:,::1] filtered_hs = np.empty((T,n))
@@ -434,8 +429,8 @@ def info_E_step(
     cdef double lognorm = 0.
 
     # run filter forwards
-    predict_Js[0] = np.copy(J_init)
-    predict_hs[0] = np.copy(h_init)
+    predict_Js[0,:,:] = J_init
+    predict_hs[0,:] = h_init
     for t in range(T-1):
         info_condition_on(
             predict_Js[t], predict_hs[t], J_node[t], h_node[t],
@@ -445,13 +440,16 @@ def info_E_step(
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
     info_condition_on(
-        J_predict, h_predict, J_node[T-1], h_node[T-1],
+        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
     lognorm += info_lognorm_copy(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
 
     # run info-form rts update backwards
     # overwriting the filtered params with smoothed ones
+    info_to_distn(
+        filtered_Js[T-1], filtered_hs[T-1],
+        smoothed_mus[T-1], smoothed_sigmas[T-1])
     for t in range(T-2,-1,-1):
         info_rts_backward_step(
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
@@ -481,38 +479,6 @@ cdef inline void info_condition_on(
     for i in range(n):
         for j in range(n):
             Jout[i,j] = J1[i,j] + J2[i,j]
-
-
-cdef inline double info_lognorm(double[:,:] J, double[:] h) nogil:
-    # NOTE: mutates input to chol(J) and solve_triangular(chol(J),h), resp.
-
-    cdef int n = J.shape[0]
-    cdef int nn = n*n
-    cdef int inc = 1, info = 0
-    cdef double lognorm = 0.
-
-    dpotrf('L', &n, &J[0,0], &n, &info)
-    dtrtrs('L', 'N', 'N', &n, &inc, &J[0,0], &n, &h[0], &n, &info)
-
-    lognorm += (1./2) * dnrm2(&n, &h[0], &inc)**2
-    for i in range(n):
-        lognorm -= log(J[i,i])
-    lognorm += n/2. * log(2*PI)
-
-    return lognorm
-
-
-cdef inline double info_lognorm_copy(
-    double[:,:] J, double[:] h,
-    double[:] temp_n, double[:,:] temp_nn,
-    ) nogil:
-    cdef int n = J.shape[0]
-    cdef int nn = n*n, inc = 1
-
-    dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
-    dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
-
-    return info_lognorm(temp_nn, temp_n)
 
 
 cdef inline double info_predict(
@@ -546,6 +512,38 @@ cdef inline double info_predict(
     # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
 
     return lognorm
+
+
+cdef inline double info_lognorm(double[:,:] J, double[:] h) nogil:
+    # NOTE: mutates input to chol(J) and solve_triangular(chol(J),h), resp.
+
+    cdef int n = J.shape[0]
+    cdef int nn = n*n
+    cdef int inc = 1, info = 0
+    cdef double lognorm = 0.
+
+    dpotrf('L', &n, &J[0,0], &n, &info)
+    dtrtrs('L', 'N', 'N', &n, &inc, &J[0,0], &n, &h[0], &n, &info)
+
+    lognorm += (1./2) * dnrm2(&n, &h[0], &inc)**2
+    for i in range(n):
+        lognorm -= log(J[i,i])
+    lognorm += n/2. * log(2*PI)
+
+    return lognorm
+
+
+cdef inline double info_lognorm_copy(
+    double[:,:] J, double[:] h,
+    double[:] temp_n, double[:,:] temp_nn,
+    ) nogil:
+    cdef int n = J.shape[0]
+    cdef int nn = n*n, inc = 1
+
+    dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
+    dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
+
+    return info_lognorm(temp_nn, temp_n)
 
 
 cdef inline void info_rts_backward_step(
@@ -590,6 +588,21 @@ cdef inline void info_rts_backward_step(
 
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &Cov_xnx[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &Cov_xnx[0,0], &n, &info)
+
+
+cdef inline void info_to_distn(
+    double[:,:] J, double[:] h, double[:] mu, double[:,:] Sigma,
+    ) nogil:
+    cdef int n = J.shape[0]
+    cdef int nn = n*n
+    cdef int inc = 1, info = 0
+    cdef double zero = 0., one = 1.
+
+    dcopy(&nn, &J[0,0], &inc, &Sigma[0,0], &inc)
+    dpotrf('L', &n, &Sigma[0,0], &n, &info)
+    dpotri('L', &n, &Sigma[0,0], &n, &info)
+    copy_upper_lower(Sigma)  # NOTE: 'L' in Fortran order, but upper for C order
+    dgemv('N', &n, &n, &one, &Sigma[0,0], &n, &h[0], &inc, &zero, &mu[0], &inc)
 
 
 ### testing
