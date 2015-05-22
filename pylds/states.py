@@ -16,6 +16,8 @@ class LDSStates(object):
         self.T = T if T else data.shape[0]
         self.data = data
 
+        self._normalizer = None
+
         if stateseq is not None:
             self.stateseq = stateseq
         elif generate:

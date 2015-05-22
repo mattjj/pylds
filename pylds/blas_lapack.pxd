@@ -237,17 +237,15 @@ cdef inline void chol_downdate(int n, floating *R, floating *z) nogil:
             z[j] = (rbar*z[j] - z[k]*R[k*n+j]) / R[k*n+k]
         R[k*n+k] = rbar
 
-cdef inline void copy_transpose(floating[:,:] x, floating[:,:] y) nogil:
-    cdef int m = x.shape[0], n = x.shape[1]
+cdef inline void copy_transpose(int n, floating *x, floating *y) nogil:
     cdef int i, j
-    for i in range(m):
+    for i in range(n):
         for j in range(n):
-            y[i,j] = x[j,i]
+            y[n*i+j] = x[n*j+i]
 
-cdef inline void copy_upper_lower(floating[:,:] x) nogil:
-    cdef int n = x.shape[0]
+cdef inline void copy_upper_lower(int n, floating *x) nogil:
     cdef int i, j
     for i in range(n):
         for j in range(i):
-            x[i,j] = x[j,i]
+            x[n*i+j] = x[n*j+i]
 

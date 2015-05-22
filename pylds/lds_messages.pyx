@@ -22,11 +22,13 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # NOTE: I tried the dsymm / dsyrk version and it was slower, even for larger p!
 # NOTE: using typed memoryview syntax instead of raw pointers is like 1.5-3%
 # slower due to struct passing overhead, but much prettier
-# NOTE: scipy doesn't expose a dtrsm binding
+# NOTE: scipy doesn't expose a dtrsm binding... weird
 
 # TODO cholesky update/downdate versions (square root filter)
 # TODO test info smoother/Estep
 # TODO factor out filter routines (for parallelism and deduplication)
+# TODO instead of specializing last step in info filtering and rts, we could
+# instead just pad the input J's and h's by zeroes
 
 
 ##################################
@@ -567,9 +569,9 @@ cdef inline void info_rts_backward_step(
     dcopy(&nn, &Jsmooth_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &neg1, &Jpred_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &one, &J22[0,0], &inc, &temp_nn[0,0], &inc)
-    dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+    copy_transpose(n, &J21[0,0], &temp_nn2[0,0])
 
-    copy_transpose(J21, temp_nn2)
+    dpotrf('L', &n, &temp_nn[0,0], &n, &info)
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
     daxpy(&nn, &one, &J11[0,0], &inc, &Jfilt_t[0,0], &inc)
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jfilt_t[0,0], &n)
@@ -579,12 +581,7 @@ cdef inline void info_rts_backward_step(
     dpotrs('L', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
     dgemv('N', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hfilt_t[0], &inc)
 
-    dcopy(&nn, &Jfilt_t[0,0], &inc, &sigma_t[0,0], &inc)
-    dpotrf('L', &n, &sigma_t[0,0], &n, &info)
-    dcopy(&n, &hfilt_t[0], &inc, &mu_t[0], &inc)
-    dpotrs('L', &n, &inc, &sigma_t[0,0], &n, &mu_t[0], &n, &info)
-    dpotri('L', &n, &sigma_t[0,0], &n, &info)
-    copy_upper_lower(sigma_t)
+    info_to_distn(Jfilt_t, hfilt_t, mu_t, sigma_t)
 
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &Cov_xnx[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &Cov_xnx[0,0], &n, &info)
@@ -601,7 +598,7 @@ cdef inline void info_to_distn(
     dcopy(&nn, &J[0,0], &inc, &Sigma[0,0], &inc)
     dpotrf('L', &n, &Sigma[0,0], &n, &info)
     dpotri('L', &n, &Sigma[0,0], &n, &info)
-    copy_upper_lower(Sigma)  # NOTE: 'L' in Fortran order, but upper for C order
+    copy_upper_lower(n, &Sigma[0,0])  # NOTE: 'L' in Fortran order, but upper for C order
     dgemv('N', &n, &n, &one, &Sigma[0,0], &n, &h[0], &inc, &zero, &mu[0], &inc)
 
 
@@ -618,9 +615,9 @@ def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
 def info_rts_test(
         J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, hfilt_t,
         hsmooth_tp1, mu_t, sigma_t, Cov_xnx):
-    temp_n = np.zeros_like(mu_t)
-    temp_nn = np.zeros_like(sigma_t)
-    temp_nn2 = np.zeros_like(sigma_t)
+    temp_n = np.random.randn(*mu_t.shape)
+    temp_nn = np.random.randn(*sigma_t.shape)
+    temp_nn2 = np.random.randn(*sigma_t.shape)
 
     return info_rts_backward_step(
           J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,

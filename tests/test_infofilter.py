@@ -322,8 +322,6 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
     _, smoothed_mus2, smoothed_sigmas2, _ = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    # TODO fails here
-
     assert all(np.allclose(mu1,mu2)
                for mu1, mu2 in zip(smoothed_mus, smoothed_mus2))
     assert all(np.allclose(s1, s2)
@@ -335,8 +333,7 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
 
 def test_info_Estep():
     for _ in xrange(1):
-        # n, p, T = randint(1,5), randint(1,5), randint(10,20)
-        n, p, T = 2, 2, 3  # TODO put back
+        n, p, T = randint(1,5), randint(1,5), randint(10,20)
         model = generate_model(n,p)
         data = generate_data(*(model + (T,)))
         yield (check_info_Estep,) + model + (data,)
