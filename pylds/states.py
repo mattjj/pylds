@@ -46,10 +46,10 @@ class LDSStates(object):
         stateseq[0] = np.random.multivariate_normal(self.mu_init, self.sigma_init)
 
         chol = np.linalg.cholesky(self.sigma_states)
-        randseq = np.random.randn(T-1,n)
+        randseq = np.random.randn(T-1,n).dot(chol.T)
 
         for t in xrange(1,T):
-            stateseq[t] = self.A.dot(stateseq[t-1]) + chol.dot(randseq[t-1])
+            stateseq[t] = self.A.dot(stateseq[t-1]) + randseq[t-1]
 
         return stateseq
 

@@ -10,6 +10,7 @@ from pylds.lds_messages import info_predict_test, info_rts_test
 #  util  #
 ##########
 
+
 def blockarray(*args,**kwargs):
     return np.array(np.bmat(*args,**kwargs),copy=False)
 
@@ -24,7 +25,7 @@ def cumsum(l, strict=False):
 def rand_psd(n,k=None):
     k = k if k else n
     out = randn(n,k)
-    return out.dot(out.T)
+    return np.atleast_2d(out.dot(out.T))
 
 
 def blockdiag(mats):
@@ -50,6 +51,76 @@ def mean_to_info(mu,Sigma):
 
 def spectral_radius(A):
     return max(np.abs(np.linalg.eigvals(A)))
+
+
+def generate_model(n, p):
+    A = randn(n,n)
+    A /= 2.*spectral_radius(A)  # ensures stability
+    assert spectral_radius(A) < 1.
+
+    B = randn(n,n)
+    C = randn(p,n)
+    D = randn(p,p)
+
+    mu_init = randn(n)
+    sigma_init = rand_psd(n)
+
+    return A, B, C, D, mu_init, sigma_init
+
+
+def generate_data(A, B, C, D, mu_init, sigma_init, T):
+    p, n = C.shape
+    x = np.zeros((T+1,n))
+    out = np.zeros((T,p))
+
+    staterandseq = randn(T,n)
+    emissionrandseq = randn(T,p)
+
+    x[0] = np.random.multivariate_normal(mu_init,sigma_init)
+    for t in xrange(T):
+        x[t+1] = A.dot(x[t]) + B.dot(staterandseq[t])
+        out[t] = C.dot(x[t]) + D.dot(emissionrandseq[t])
+
+    return out
+
+
+def info_params(A, B, C, D, mu_init, sigma_init, data):
+    J_init = np.linalg.inv(sigma_init)
+    h_init = np.linalg.solve(sigma_init, mu_init)
+
+    BBT = B.dot(B.T)
+    J_pair_11 = A.T.dot(np.linalg.solve(BBT,A))
+    J_pair_21 = -np.linalg.solve(BBT,A)
+    J_pair_22 = np.linalg.inv(BBT)
+
+    DDT = D.dot(D.T)
+    J_node = C.T.dot(np.linalg.solve(DDT,C))
+    h_node = np.einsum('ik,ij,tj->tk',C,np.linalg.inv(DDT),data)
+
+    return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, \
+        J_node, h_node
+
+
+def dense_infoparams(A, B, C, D, mu_init, sigma_init, data):
+    p, n = C.shape
+    T = data.shape[0]
+
+    J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node = \
+        info_params(A, B, C, D, mu_init, sigma_init, data)
+
+    h_node[0] += h_init
+    h = h_node.ravel()
+
+    J = np.kron(np.eye(T), J_node)
+    pairblock = blockarray([[J_pair_11, J_pair_21.T], [J_pair_21, J_pair_22]])
+    for t in range(0,n*(T-1),n):
+        J[t:t+2*n,t:t+2*n] += pairblock
+    J[:n, :n] += J_init
+
+    assert J.shape == (T*n, T*n)
+    assert h.shape == (T*n,)
+
+    return J, h
 
 
 ##########################
@@ -150,7 +221,7 @@ def check_info_rts(potentials):
     assert np.allclose(py_Covxnx,cy_Covxnx)
 
 
-def test_info_rts():
+def test_info_rts_step():
     def generate_potentials(n):
         bigJ = rand_psd(2*n,2*n)
         J11, J21, J22 = map(np.copy,[bigJ[:n,:n], bigJ[n:,:n], bigJ[n:,n:]])
@@ -184,43 +255,6 @@ def test_info_rts():
 ####################################
 
 def check_filters(A, B, C, D, mu_init, sigma_init, data):
-    def info_params(A, B, C, D, data):
-        J_init = np.linalg.inv(sigma_init)
-        h_init = np.linalg.solve(sigma_init, mu_init)
-
-        BBT = B.dot(B.T)
-        J_pair_11 = A.T.dot(np.linalg.solve(BBT,A))
-        J_pair_21 = -np.linalg.solve(BBT,A)
-        J_pair_22 = np.linalg.inv(BBT)
-
-        DDT = D.dot(D.T)
-        J_node = C.T.dot(np.linalg.solve(DDT,C))
-        h_node = np.einsum('ik,ij,tj->tk',C,np.linalg.inv(DDT),data)
-
-        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, \
-            J_node, h_node
-
-    def dense_infoparams(A, B, C, D, data):
-        p, n = C.shape
-        T = data.shape[0]
-
-        J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node = \
-            info_params(A, B, C, D, data)
-
-        h_node[0] += h_init
-        h = h_node.ravel()
-
-        J = np.kron(np.eye(T), J_node)
-        pairblock = blockarray([[J_pair_11, J_pair_21.T], [J_pair_21, J_pair_22]])
-        for t in range(0,n*(T-1),n):
-            J[t:t+2*n,t:t+2*n] += pairblock
-        J[:n, :n] += J_init
-
-        assert J.shape == (T*n, T*n)
-        assert h.shape == (T*n,)
-
-        return J, h
-
     def info_normalizer(J,h):
         out = 0.
         out += 1/2. * h.dot(np.linalg.solve(J,h))
@@ -248,9 +282,10 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
 
     ll, filtered_mus, filtered_sigmas = kalman_filter(
         mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
-    py_partial_ll = info_normalizer(*dense_infoparams(A, B, C, D, data))
+    py_partial_ll = info_normalizer(*dense_infoparams(
+        A, B, C, D, mu_init, sigma_init, data))
     partial_ll, filtered_Js, filtered_hs = kalman_info_filter(
-        *info_params(A,B,C,D,data))
+        *info_params(A, B, C, D, mu_init, sigma_init, data))
 
     ll2 = partial_ll + extra_loglike_terms(A, B, C, D, data)
     filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
@@ -265,39 +300,23 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     assert np.isclose(ll, ll2)
 
 
+# def check_info_rts(A, B, C, D, mu_init, sigma_init, data):
+#     # TODO
+#     pass
+
+
 def test_info_filter():
-    def generate_model(n, p):
-        A = randn(n,n)
-        A /= 2.*spectral_radius(A)  # ensures stability
-        assert spectral_radius(A) < 1.
-
-        B = randn(n,n)
-        C = randn(p,n)
-        D = randn(p,p)
-
-        mu_init = randn(n)
-        sigma_init = rand_psd(n)
-
-        return A, B, C, D, mu_init, sigma_init
-
-    def generate_data(A, B, C, D, mu_init, sigma_init, T):
-        p, n = C.shape
-        x = np.zeros((T+1,n))
-        out = np.zeros((T,p))
-
-        staterandseq = randn(T,n)
-        emissionrandseq = randn(T,p)
-
-        x[0] = np.random.multivariate_normal(mu_init,sigma_init)
-        for t in xrange(T):
-            x[t+1] = A.dot(x[t]) + B.dot(staterandseq[t])
-            out[t] = C.dot(x[t]) + D.dot(emissionrandseq[t])
-
-        return out
-
     for _ in xrange(5):
         n, p, T = randint(1,5), randint(1,5), randint(10,20)
         model = generate_model(n,p)
         data = generate_data(*(model + (T,)))
         yield (check_filters,) + model + (data,)
+
+
+# def test_info_rts():
+#     for _ in xrange(5):
+#         n, p, T = randint(1,5), randint(1,5), randint(10,20)
+#         model = generate_model(n,p)
+#         data = generate_data(*(model + (T,)))
+#         yield (check_info_rts,) + model + (data,)
 
