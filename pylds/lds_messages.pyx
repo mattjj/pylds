@@ -447,9 +447,8 @@ def info_E_step(
     info_condition_on(
         J_predict, h_predict, J_node[T-1], h_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
-    lognorm -= info_lognorm_copy(
+    lognorm += info_lognorm_copy(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
-    lognorm += n/2. * log(2*PI)
 
     # run info-form rts update backwards
     # overwriting the filtered params with smoothed ones

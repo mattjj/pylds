@@ -265,7 +265,7 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     assert np.isclose(ll, ll2)
 
 
-def test_info_loglike():
+def test_info_filter():
     def generate_model(n, p):
         A = randn(n,n)
         A /= 2.*spectral_radius(A)  # ensures stability
