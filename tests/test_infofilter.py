@@ -332,7 +332,7 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
 
 
 def test_info_Estep():
-    for _ in xrange(1):
+    for _ in xrange(5):
         n, p, T = randint(1,5), randint(1,5), randint(10,20)
         model = generate_model(n,p)
         data = generate_data(*(model + (T,)))
