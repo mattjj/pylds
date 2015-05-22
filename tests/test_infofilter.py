@@ -253,8 +253,7 @@ def test_info_rts_step():
         return potentials, answers
 
     for _ in xrange(5):
-        # n = randint(1,5)
-        n = 2  # TODO put back
+        n = randint(1,5)
         potentials, answers = generate_potentials(n)
         yield check_info_rts_step, potentials, answers
 
