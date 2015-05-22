@@ -427,7 +427,7 @@ def info_E_step(
     # allocate output
     cdef double[:,::1] smoothed_mus = np.empty((T,n))
     cdef double[:,:,::1] smoothed_sigmas = np.empty((T,n,n))
-    cdef double[:,:,::1] Cov_xnxs = np.empty((T-1,n,n))  # 'n' for next
+    cdef double[:,:,::1] Cov_xxns = np.empty((T-1,n,n))  # 'n' for next
     cdef double lognorm = 0.
 
     # run filter forwards
@@ -457,10 +457,10 @@ def info_E_step(
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
             predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],  # filtered_Js[t] is mutated
             predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],  # filtered_hs[t] is mutated
-            smoothed_mus[t], smoothed_sigmas[t], Cov_xnxs[t],
+            smoothed_mus[t], smoothed_sigmas[t], Cov_xxns[t],
             temp_n, temp_nn, temp_nn2)
 
-    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(Cov_xnxs)
+    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(Cov_xxns)
 
 
 ###########################

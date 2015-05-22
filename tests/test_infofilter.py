@@ -124,6 +124,25 @@ def dense_infoparams(A, B, C, D, mu_init, sigma_init, data):
     return J, h
 
 
+def extra_loglike_terms(A, B, C, D, mu_init, sigma_init, data):
+    p, n = C.shape
+    T = data.shape[0]
+    out = 0.
+
+    out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
+    out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
+    out -= n/2. * np.log(2*np.pi)
+
+    out -= (T-1)/2. * np.linalg.slogdet(B.dot(B.T))[1]
+    out -= (T-1)*n/2. * np.log(2*np.pi)
+
+    out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(D.dot(D.T)),data,data)
+    out -= T/2. * np.linalg.slogdet(D.dot(D.T))[1]
+    out -= T*p/2 * np.log(2*np.pi)
+
+    return out
+
+
 ##########################
 #  testing info_predict  #
 ##########################
@@ -270,24 +289,6 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
         out += h.shape[0]/2. * np.log(2*np.pi)
         return out
 
-    def extra_loglike_terms(A, B, C, D, data):
-        p, n = C.shape
-        T = data.shape[0]
-        out = 0.
-
-        out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
-        out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
-        out -= n/2. * np.log(2*np.pi)
-
-        out -= (T-1)/2. * np.linalg.slogdet(B.dot(B.T))[1]
-        out -= (T-1)*n/2. * np.log(2*np.pi)
-
-        out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(D.dot(D.T)),data,data)
-        out -= T/2. * np.linalg.slogdet(D.dot(D.T))[1]
-        out -= T*p/2 * np.log(2*np.pi)
-
-        return out
-
     ll, filtered_mus, filtered_sigmas = kalman_filter(
         mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
     py_partial_ll = info_normalizer(*dense_infoparams(
@@ -295,7 +296,8 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, filtered_Js, filtered_hs = kalman_info_filter(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + extra_loglike_terms(A, B, C, D, data)
+    ll2 = partial_ll + extra_loglike_terms(
+        A, B, C, D, mu_init, sigma_init, data)
     filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
     filtered_sigmas2 = [np.linalg.inv(J) for J in filtered_Js]
 
@@ -317,18 +319,25 @@ def test_info_filter():
 
 
 def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
-    _, smoothed_mus, smoothed_sigmas, _ = E_step(
+    def Covxxn_to_ExnxT(Covxxn, smoothed_mus):
+        outs = np.empty_like(Covxxn)
+        for out, cov, mu_t, mu_tp1 in zip(outs,Covxxn, smoothed_mus[:-1], smoothed_mus[1:]):
+            out[...] = cov.T + np.outer(mu_tp1,mu_t)
+        return outs
+
+    ll, smoothed_mus, smoothed_sigmas, ExnxT = E_step(
         mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
-    _, smoothed_mus2, smoothed_sigmas2, _ = info_E_step(
+    partial_ll, smoothed_mus2, smoothed_sigmas2, Covxxn = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    assert all(np.allclose(mu1,mu2)
-               for mu1, mu2 in zip(smoothed_mus, smoothed_mus2))
-    assert all(np.allclose(s1, s2)
-               for s1, s2 in zip(smoothed_sigmas, smoothed_sigmas2))
+    ll2 = partial_ll + extra_loglike_terms(
+        A, B, C, D, mu_init, sigma_init, data)
+    ExnxT2 = Covxxn_to_ExnxT(Covxxn,smoothed_mus2)
 
-    # TODO check cross terms
-    # TODO check likelihood
+    assert np.isclose(ll,ll2)
+    assert np.allclose(smoothed_mus, smoothed_mus2)
+    assert np.allclose(smoothed_sigmas, smoothed_sigmas2)
+    assert np.allclose(ExnxT, ExnxT2)
 
 
 def test_info_Estep():
