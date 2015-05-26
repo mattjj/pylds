@@ -24,6 +24,9 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # slower due to struct passing overhead, but much prettier
 # NOTE: scipy doesn't expose a dtrsm binding... weird
 
+# TODO try an Eigen version! faster for small matrices (numerically and in
+# function call overhead)
+# TODO use info form when p > n
 # TODO cholesky update/downdate versions (square root filter)
 # TODO test info smoother/Estep
 # TODO factor out filter routines (for parallelism and deduplication)
@@ -183,11 +186,12 @@ def filter_and_sample_diagonal(
     cdef double[::1] mu_predict = np.copy(mu_init)
     cdef double[:,:] sigma_predict = np.copy(sigma_init)
 
-    cdef double[::1,:] temp_p2 = np.empty((p,),order='F')
-    cdef double[::1,:] temp_pn = np.empty((p,n),order='F')
-    cdef double[::1]   temp_p  = np.empty((p,), order='F')
-    cdef double[::1,:] temp_nn = np.empty((n,n),order='F')
-    cdef double[::1]   temp_n  = np.empty((n,), order='F')
+    cdef double[::1,:] temp_pn = np.empty((p,n),  order='F')
+    cdef double[::1]   temp_p  = np.empty((p,),   order='F')
+    cdef double[::1,:] temp_nn = np.empty((n,n),  order='F')
+    cdef double[::1]   temp_n  = np.empty((n,),   order='F')
+    cdef double[::1,:] temp_pk = np.empty((p,n+1),order='F')
+    cdef double[::1,:] temp_nk = np.empty((n,n+1),order='F')
 
     cdef double[:,::1] filtered_mus = np.empty((T,n))
     cdef double[:,:,::1] filtered_sigmas = np.empty((T,n,n))
@@ -201,7 +205,7 @@ def filter_and_sample_diagonal(
         ll += condition_on_diagonal(
             mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
-            temp_p, temp_p2, temp_nn, temp_pn)
+            temp_p, temp_nn, temp_pn, temp_pk, temp_nk)
         predict(
             filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
             mu_predict, sigma_predict,
@@ -675,11 +679,11 @@ def info_rts_test(
 
 
 cdef inline double condition_on_diagonal(
-    double[:] mu_x, double[:,:] sigma_obs,
+    double[:] mu_x, double[:,:] sigma_x,
     double[:,:] C, double[:] sigma_obs, double[:] y,
     double[:] mu_cond, double[:,:] sigma_cond,
     double[:] temp_p, double[:,:] temp_nn, double[:,:] temp_pn,
-    double[:,:] temp_pn1, double[:,:] temp_nk,
+    double[:,:] temp_pk, double[:,:] temp_nk,
     ) nogil:
 
     # see Boyd and Vandenberghe, Convex Optimization, Appendix C.4 (p. 679)
@@ -703,25 +707,27 @@ cdef inline double condition_on_diagonal(
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         # temp_pn = B = C sigma_x
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
-        # temp_pn1[:,0] = temp_p
-        dcopy(&n, &temp_p[0], &inc, &temp_pn1[0,0], &inc)
-        # temp_pn1[:,1:] = temp_pn
-        dcopy(&pn, &temp_pn[0,0], &inc, &temp_pn1[0,1], &inc)
+        # temp_pk[:,0] = temp_p
+        dcopy(&n, &temp_p[0], &inc, &temp_pk[0,0], &inc)
+        # temp_pk[:,1:] = temp_pn
+        dcopy(&pn, &temp_pn[0,0], &inc, &temp_pk[0,1], &inc)
 
-        # temp_pn1 = (sigma_obs + BB')^{-1} temp_pn1
-        solve_diagonal_plus_lowrank(sigma_obs, temp_pn, temp_pn1, temp_nn, temp_nk)
+        # temp_pk = (sigma_obs + BB')^{-1} temp_pk
+        solve_diagonal_plus_lowrank(
+            sigma_obs, temp_pn, temp_pk,
+            temp_nn, temp_pn, temp_nk)
 
         # mu_cond = mu_x + B' temp_pn[:,0]
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
-        dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_pn1[0,0], &inc, &one, &mu_cond[0], &inc)
+        dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_pk[0,0], &inc, &one, &mu_cond[0], &inc)
 
-        # sigma_cond = sigma_x - B' temp_pn1[:,1:]
+        # sigma_cond = sigma_x - B' temp_pk[:,1:]
         if (&sigma_x[0,0] != &sigma_cond[0,0]):
             dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
-        dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pn1[0,1], &p, &one, &sigma_cond[0,0], &n)
+        dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pk[0,1], &p, &one, &sigma_cond[0,0], &n)
 
-        ll = -1./2 * ddot(&p, &temp_p[0], &inc, &temp_pn1[0,0], &inc)
+        ll = -1./2 * ddot(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
         ll -= p/2. * log(2*PI)
         for i in range(p):
             ll -= 1./2 * log(sigma_obs[i])
@@ -732,7 +738,7 @@ cdef inline double condition_on_diagonal(
 
 cdef inline void solve_diagonal_plus_lowrank(
     double[:] a, double[:,:] B, double[:,:] b,
-    double[:,:] temp_nn, double[:,:] temp_nk,
+    double[:,:] temp_nn, double[:,:] temp_pn, double[:,:] temp_nk,
     ) nogil:
     cdef int p = B.shape[0], n = B.shape[1], k = b.shape[1]
     cdef int inc = 1, info = 0, i, j
@@ -748,9 +754,9 @@ cdef inline void solve_diagonal_plus_lowrank(
     # temp_pn = A^{-1} B
     for j in range(n):
         for i in range(p):
-            temp_pn[i,j] = B[i,j] / sigma_obs[i]
+            temp_pn[i,j] = B[i,j] / a[i]
     # temp_nn = chol(E) = chol(I + B' A^{-1} B)
-    dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &zero, &temp_nn[0], &n)
+    dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &zero, &temp_nn[0,0], &n)
     for i in range(n):
         for j in range(n):
             temp_nn[i,j] += 1
