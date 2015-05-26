@@ -96,6 +96,13 @@ ctypedef int dtrmv_t(
     ) nogil
 cdef dtrmv_t *dtrmv
 
+ctypedef int dsyrk_t(
+    char *uplo, char *trans, int *n, int *k,
+    double *alpha, double *A, int *lda,
+    double *beta, double *c, int *ldc
+    ) nogil
+cdef dsyrk_t *dsyrk
+
 ############
 #  LAPACK  #
 ############
@@ -103,38 +110,28 @@ cdef dtrmv_t *dtrmv
 # http://www.netlib.org/lapack/
 
 ctypedef int dposv_t(
-    char *uplo, int *n, int *nrhs,
-    double *A, int *lda,
-    double *B, int *ldb,
+    char *uplo, int *n, int *nrhs, double *A, int *lda, double *B, int *ldb,
     int *info) nogil
 cdef dposv_t *dposv
 
 ctypedef int dpotrf_t(
-    char *uplo, int *n,
-    double *a, int *lda,
-    int *info) nogil
+    char *uplo, int *n, double *a, int *lda, int *info) nogil
 cdef dpotrf_t *dpotrf
 
 ctypedef int dpotrs_t(
-    char *uplo, int *n, int *nrhs,
-    double *a, int *lda,
-    double *b, int *ldb,
+    char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb,
     int *info) nogil
 cdef dpotrs_t *dpotrs
 
 ctypedef int dtrtrs_t(
     char *uplo, char *trans, char *diag, int *n, int *nrhs,
-    double *A, int *lda,
-    double *B, int *ldb,
+    double *A, int *lda, double *B, int *ldb,
     int *info) nogil
 cdef dtrtrs_t *dtrtrs
 
-ctypedef int dsyrk_t(
-    char *uplo, char *trans, int *n, int *k,
-    double *alpha, double *A, int *lda,
-    double *beta, double *c, int *ldc
-    ) nogil
-cdef dsyrk_t *dsyrk
+ctypedef int dpotri_t(
+    char *uplo, int *n, double *a, int *lda, int *info) nogil
+cdef dpotri_t *dpotri
 
 ##################
 #  example call  #
@@ -240,4 +237,15 @@ cdef inline void chol_downdate(int n, floating *R, floating *z) nogil:
             z[j] = (rbar*z[j] - z[k]*R[k*n+j]) / R[k*n+k]
         R[k*n+k] = rbar
 
+cdef inline void copy_transpose(int n, floating *x, floating *y) nogil:
+    cdef int i, j
+    for i in range(n):
+        for j in range(n):
+            y[n*i+j] = x[n*j+i]
+
+cdef inline void copy_upper_lower(int n, floating *x) nogil:
+    cdef int i, j
+    for i in range(n):
+        for j in range(i):
+            x[n*i+j] = x[n*j+i]
 

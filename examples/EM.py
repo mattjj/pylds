@@ -1,14 +1,15 @@
 from __future__ import division
 import numpy as np
+import numpy.random as npr
 import matplotlib.pyplot as plt
 
 from pybasicbayes.distributions import Regression
 from pybasicbayes.util.text import progprint_xrange
 from autoregressive.distributions import AutoRegression
 
-from models import LDS, DefaultLDS
+from pylds.models import LDS, DefaultLDS
 
-np.random.seed(0)
+npr.seed(0)
 
 #########################
 #  set some parameters  #

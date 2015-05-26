@@ -33,4 +33,5 @@ cdef:
     dpotrf_t *dpotrf = <dpotrf_t*>f2py_pointer(scipy.linalg.lapack.dpotrf._cpointer)
     dpotrs_t *dpotrs = <dpotrs_t*>f2py_pointer(scipy.linalg.lapack.dpotrs._cpointer)
     dtrtrs_t *dtrtrs = <dtrtrs_t*>f2py_pointer(scipy.linalg.lapack.dtrtrs._cpointer)
+    dpotri_t *dpotri = <dpotri_t*>f2py_pointer(scipy.linalg.lapack.dpotri._cpointer)
 
