@@ -237,11 +237,12 @@ cdef inline void chol_downdate(int n, floating *R, floating *z) nogil:
             z[j] = (rbar*z[j] - z[k]*R[k*n+j]) / R[k*n+k]
         R[k*n+k] = rbar
 
-cdef inline void copy_transpose(int n, floating *x, floating *y) nogil:
+cdef inline void copy_transpose(int m, int n, floating *x, floating *y) nogil:
+    # NOTE: x is (m,n) and stored in Fortran order
     cdef int i, j
-    for i in range(n):
+    for i in range(m):
         for j in range(n):
-            y[n*i+j] = x[n*j+i]
+            y[n*i+j] = x[m*j+i]
 
 cdef inline void copy_upper_lower(int n, floating *x) nogil:
     cdef int i, j
