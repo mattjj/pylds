@@ -7,12 +7,12 @@ from numpy.lib.stride_tricks import as_strided
 
 cimport numpy as np
 cimport cython
-from libc.math cimport log
+from libc.math cimport log, sqrt
 from numpy.math cimport INFINITY, PI
 
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
-        dger, dnrm2, dpotri, copy_transpose, copy_upper_lower
+        dger, dnrm2, dpotri, copy_transpose, copy_upper_lower, ddot
 
 # NOTE: because the matrix operations are done in Fortran order but the code
 # expects C ordered arrays as input, the BLAS and LAPACK function calls mark
@@ -153,6 +153,55 @@ def filter_and_sample(
             mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_pn, temp_pp)
+        predict(
+            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            mu_predict, sigma_predict,
+            temp_nn)
+
+    # sample backwards
+    sample_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
+    for t in range(T-2,-1,-1):
+        condition_on(
+            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t], randseq[t+1],
+            filtered_mus[t], filtered_sigmas[t],
+            temp_n, temp_nn, sigma_predict)
+        sample_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
+
+    return ll, np.asarray(randseq)
+
+
+def filter_and_sample_diagonal(
+    double[:] mu_init, double[:,:] sigma_init,
+    double[:,:,:] A, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:] sigma_obs,
+    double[:,::1] data):
+
+    # allocate temporaries and internals
+    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int t
+
+    cdef double[::1] mu_predict = np.copy(mu_init)
+    cdef double[:,:] sigma_predict = np.copy(sigma_init)
+
+    cdef double[::1,:] temp_p2 = np.empty((p,),order='F')
+    cdef double[::1,:] temp_pn = np.empty((p,n),order='F')
+    cdef double[::1]   temp_p  = np.empty((p,), order='F')
+    cdef double[::1,:] temp_nn = np.empty((n,n),order='F')
+    cdef double[::1]   temp_n  = np.empty((n,), order='F')
+
+    cdef double[:,::1] filtered_mus = np.empty((T,n))
+    cdef double[:,:,::1] filtered_sigmas = np.empty((T,n,n))
+
+    # allocate output and generate randomness
+    cdef double[:,::1] randseq = np.random.randn(T,n)
+    cdef double ll = 0.
+
+    # run filter forwards
+    for t in range(T):
+        ll += condition_on_diagonal(
+            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            filtered_mus[t], filtered_sigmas[t],
+            temp_p, temp_p2, temp_nn, temp_pn)
         predict(
             filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
             mu_predict, sigma_predict,
@@ -623,4 +672,94 @@ def info_rts_test(
           J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
           hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
           temp_n, temp_nn, temp_nn2)
+
+
+cdef inline double condition_on_diagonal(
+    double[:] mu_x, double[:,:] sigma_obs,
+    double[:,:] C, double[:] sigma_obs, double[:] y,
+    double[:] mu_cond, double[:,:] sigma_cond,
+    double[:] temp_p, double[:,:] temp_nn, double[:,:] temp_pn,
+    double[:,:] temp_pn1, double[:,:] temp_nk,
+    ) nogil:
+
+    # see Boyd and Vandenberghe, Convex Optimization, Appendix C.4 (p. 679)
+    # and also https://en.wikipedia.org/wiki/Matrix_determinant_lemma
+
+    cdef int p = C.shape[0], n = C.shape[1]
+    cdef int nn = n*n, pn = p*n
+    cdef int inc = 1, info = 0, i
+    cdef double one = 1., zero = 0., neg1 = -1., ll = 0.
+
+    if y[0] != y[0]:  # nan check
+        dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
+        dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
+        return 0.
+    else:
+        # NOTE: the C arguments are treated as transposed because C is
+        # assumed to be in C order
+
+        # temp_p = y - C mu_x
+        dcopy(&n, &y[0], &inc, &temp_p[0], &inc)
+        dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
+        # temp_pn = B = C sigma_x
+        dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
+        # temp_pn1[:,0] = temp_p
+        dcopy(&n, &temp_p[0], &inc, &temp_pn1[0,0], &inc)
+        # temp_pn1[:,1:] = temp_pn
+        dcopy(&pn, &temp_pn[0,0], &inc, &temp_pn1[0,1], &inc)
+
+        # temp_pn1 = (sigma_obs + BB')^{-1} temp_pn1
+        solve_diagonal_plus_lowrank(sigma_obs, temp_pn, temp_pn1, temp_nn, temp_nk)
+
+        # mu_cond = mu_x + B' temp_pn[:,0]
+        if (&mu_x[0] != &mu_cond[0]):
+            dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
+        dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_pn1[0,0], &inc, &one, &mu_cond[0], &inc)
+
+        # sigma_cond = sigma_x - B' temp_pn1[:,1:]
+        if (&sigma_x[0,0] != &sigma_cond[0,0]):
+            dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
+        dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pn1[0,1], &p, &one, &sigma_cond[0,0], &n)
+
+        ll = -1./2 * ddot(&p, &temp_p[0], &inc, &temp_pn1[0,0], &inc)
+        ll -= p/2. * log(2*PI)
+        for i in range(p):
+            ll -= 1./2 * log(sigma_obs[i])
+        for i in range(n):
+            ll -= log(temp_nn[i,i])
+        return ll
+
+
+cdef inline void solve_diagonal_plus_lowrank(
+    double[:] a, double[:,:] B, double[:,:] b,
+    double[:,:] temp_nn, double[:,:] temp_nk,
+    ) nogil:
+    cdef int p = B.shape[0], n = B.shape[1], k = b.shape[1]
+    cdef int inc = 1, info = 0, i, j
+    cdef double one = 1., zero = 0., neg1 = -1.
+
+    # NOTE: on exit, temp_nn is guaranteed to hold chol(I + B' A^{-1} B)
+
+    # z = A^{-1} b (stored in b)
+    for j in range(k):
+        for i in range(p):
+            b[i,j] /= a[i]
+
+    # temp_pn = A^{-1} B
+    for j in range(n):
+        for i in range(p):
+            temp_pn[i,j] = B[i,j] / sigma_obs[i]
+    # temp_nn = chol(E) = chol(I + B' A^{-1} B)
+    dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &zero, &temp_nn[0], &n)
+    for i in range(n):
+        for j in range(n):
+            temp_nn[i,j] += 1
+    dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+
+    # temp_nk = w = solve(E, B' z)
+    dgemm('T', 'N', &n, &k, &p, &one, &B[0,0], &p, &b[0,0], &p, &zero, &temp_nk[0,0], &n)
+    dpotrs('L', &n, &k, &temp_nn[0,0], &n, &temp_nk[0,0], &n, &info)
+
+    # x = z - A^{-1} B w (stored in b)
+    dgemm('N', 'N', &p, &k, &n, &neg1, &temp_pn[0,0], &p, &temp_nk[0,0], &n, &one, &b[0,0], &p)
 
