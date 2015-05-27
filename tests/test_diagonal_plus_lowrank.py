@@ -1,8 +1,13 @@
 from __future__ import division
 import numpy as np
 from numpy.random import rand, randn, randint
+from scipy.stats import multivariate_normal
 
 from pylds.lds_messages import test_solve_diagonal_plus_lowrank, test_condition_on_diagonal
+
+
+# TODO test filtering
+# TODO test logdet stuff
 
 
 ##########
@@ -19,19 +24,23 @@ def rand_psd(n,k=None):
 #  tests  #
 ###########
 
+# test solve_diagonal_plus_lowrank
+
 def solve_diagonal_plus_lowrank(a,B,C,b):
     out = b.copy(order='F')
     B = np.asfortranarray(B)
     C_is_identity = np.allclose(C,np.eye(C.shape[0]))
-    test_solve_diagonal_plus_lowrank(a,B,C,C_is_identity,out)
-    return out
+    logdet = test_solve_diagonal_plus_lowrank(a,B,C,C_is_identity,out)
+    return logdet, out
 
 
 def check_diagonal_plus_lowrank(a,B,C,b):
     solve1 = np.linalg.solve(np.diag(a)+B.dot(C).dot(B.T), b)
-    solve2 = solve_diagonal_plus_lowrank(a,B,C,b)
+    logdet1 = np.linalg.slogdet(np.diag(a)+B.dot(C).dot(B.T))[1]
+    logdet2, solve2 = solve_diagonal_plus_lowrank(a,B,C,b)
 
-    assert np.allclose(solve1,solve2)
+    assert np.isclose(logdet1, logdet2)
+    assert np.allclose(solve1, solve2)
 
 
 def test_cython_diagonal_plus_lowrank():
@@ -45,27 +54,37 @@ def test_cython_diagonal_plus_lowrank():
         yield check_diagonal_plus_lowrank, a, B, C, b
 
 
+# test condition_on_diagonal
+
 def cython_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
     mu_cond = np.random.randn(*mu_x.shape)
     sigma_cond = np.random.randn(*sigma_x.shape)
-    test_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond)
-    return mu_cond, sigma_cond
+    ll = test_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond)
+    return ll, mu_cond, sigma_cond
 
 
 def check_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
     def condition_on(mu_x, sigma_x, C, sigma_obs, y):
+        p, n = C.shape
         sigma_xy = sigma_x.dot(C.T)
         sigma_yy = C.dot(sigma_x).dot(C.T) + np.diag(sigma_obs)
         mu_y = C.dot(mu_x)
         mu = mu_x + sigma_xy.dot(np.linalg.solve(sigma_yy, y - mu_y))
         sigma = sigma_x - sigma_xy.dot(np.linalg.solve(sigma_yy,sigma_xy.T))
-        return mu, sigma
 
-    py_mu, py_sigma = condition_on(mu_x, sigma_x, C, sigma_obs, y)
-    cy_mu, cy_sigma = cython_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y)
+        # ll = multivariate_normal.logpdf(y,mu_y,sigma_yy)
+        ll = -p/2. * np.log(2*np.pi)
+        ll -= 1./2 * (y - mu_y).dot(np.linalg.solve(sigma_yy, y - mu_y))
+        ll -= 1./2 * np.linalg.slogdet(sigma_yy)[1]
+
+        return ll, mu, sigma
+
+    py_ll, py_mu, py_sigma = condition_on(mu_x, sigma_x, C, sigma_obs, y)
+    cy_ll, cy_mu, cy_sigma = cython_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y)
 
     assert np.allclose(py_mu, cy_mu)
     assert np.allclose(py_sigma, cy_sigma)
+    assert np.isclose(py_ll, cy_ll)
 
 
 def test_cython_condition_on_diagonal():

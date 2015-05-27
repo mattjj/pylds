@@ -26,7 +26,6 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 
 # TODO try an Eigen version! faster for small matrices (numerically and in
 # function call overhead)
-# TODO use info form when p > n
 # TODO cholesky update/downdate versions (square root filter)
 # TODO test info smoother/Estep
 # TODO factor out filter routines (for parallelism and deduplication)
@@ -722,7 +721,7 @@ cdef inline double condition_on_diagonal(
         dcopy(&pn, &temp_pn[0,0], &inc, &temp_pk[0,1], &inc)
 
         # temp_pk = (sigma_obs + C sigma_x C')^{-1} temp_pk
-        solve_diagonal_plus_lowrank(
+        ll = -1./2 * solve_diagonal_plus_lowrank(
             sigma_obs, temp_pn3, sigma_x, temp_pk, False,
             temp_nn, temp_pn2, temp_nk)
 
@@ -736,22 +735,18 @@ cdef inline double condition_on_diagonal(
             dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
         dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pk[0,1], &p, &one, &sigma_cond[0,0], &n)
 
-        ll = -1./2 * ddot(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
+        ll -= 1./2 * ddot(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
         ll -= p/2. * log(2*PI)
-        for i in range(p):
-            ll -= 1./2 * log(sigma_obs[i])
-        for i in range(n):
-            ll -= log(temp_nn[i,i])
         return ll
 
 
-cdef inline void solve_diagonal_plus_lowrank(
+cdef inline double solve_diagonal_plus_lowrank(
     double[:] a, double[:,:] B, double[:,:] C, double[:,:] b, bint C_is_identity,
     double[:,:] temp_nn, double[:,:] temp_pn, double[:,:] temp_nk,
     ) nogil:
     cdef int p = B.shape[0], n = B.shape[1], k = b.shape[1]
     cdef int nn = n*n, inc = 1, info = 0, i, j
-    cdef double one = 1., zero = 0., neg1 = -1.
+    cdef double one = 1., zero = 0., neg1 = -1., logdet = 0.
 
     # NOTE: on exit, temp_nn is guaranteed to hold chol(C^{-1} + B' A^{-1} B)
     # NOTE: assumes Fortran order for everything
@@ -772,6 +767,8 @@ cdef inline void solve_diagonal_plus_lowrank(
     dcopy(&nn, &C[0,0], &inc, &temp_nn[0,0], &inc)
     if not C_is_identity:
         dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+        for i in range(n):
+            logdet += 2.*log(temp_nn[i,i])
         dpotri('L', &n, &temp_nn[0,0], &n, &info)
     dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &one, &temp_nn[0,0], &n)
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
@@ -782,6 +779,13 @@ cdef inline void solve_diagonal_plus_lowrank(
 
     # x = z - A^{-1} B w (stored in b)
     dgemm('N', 'N', &p, &k, &n, &neg1, &temp_pn[0,0], &p, &temp_nk[0,0], &n, &one, &b[0,0], &p)
+
+    for i in range(n):
+        logdet += 2.*log(temp_nn[i,i])
+    for i in range(p):
+        logdet += log(a[i])
+
+    return logdet
 
 
 def test_condition_on_diagonal(
@@ -798,7 +802,8 @@ def test_condition_on_diagonal(
     temp_pn3 = np.asfortranarray(np.random.randn(p,n))
     temp_pk  = np.asfortranarray(np.random.randn(p,k))
     temp_nk  = np.asfortranarray(np.random.randn(n,k))
-    condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond,
+    return condition_on_diagonal(
+        mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond,
         temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
 
 
@@ -811,5 +816,5 @@ def test_solve_diagonal_plus_lowrank(
     temp_nn = np.asfortranarray(np.random.randn(n,n))
     temp_pn = np.asfortranarray(np.random.randn(p,n))
     temp_nk = np.asfortranarray(np.random.randn(n,k))
-    solve_diagonal_plus_lowrank(a,B,C,b,C_is_identity,temp_nn,temp_pn,temp_nk)
+    return solve_diagonal_plus_lowrank(a,B,C,b,C_is_identity,temp_nn,temp_pn,temp_nk)
 
