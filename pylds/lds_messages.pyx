@@ -7,12 +7,12 @@ from numpy.lib.stride_tricks import as_strided
 
 cimport numpy as np
 cimport cython
-from libc.math cimport log
+from libc.math cimport log, sqrt
 from numpy.math cimport INFINITY, PI
 
 from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
         dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
-        dger, dnrm2, dpotri, copy_transpose, copy_upper_lower
+        dger, dnrm2, dpotri, copy_transpose, copy_upper_lower, ddot
 
 # NOTE: because the matrix operations are done in Fortran order but the code
 # expects C ordered arrays as input, the BLAS and LAPACK function calls mark
@@ -24,6 +24,8 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # slower due to struct passing overhead, but much prettier
 # NOTE: scipy doesn't expose a dtrsm binding... weird
 
+# TODO try an Eigen version! faster for small matrices (numerically and in
+# function call overhead)
 # TODO cholesky update/downdate versions (square root filter)
 # TODO test info smoother/Estep
 # TODO factor out filter routines (for parallelism and deduplication)
@@ -153,6 +155,58 @@ def filter_and_sample(
             mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_pn, temp_pp)
+        predict(
+            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            mu_predict, sigma_predict,
+            temp_nn)
+
+    # sample backwards
+    sample_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
+    for t in range(T-2,-1,-1):
+        condition_on(
+            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t], randseq[t+1],
+            filtered_mus[t], filtered_sigmas[t],
+            temp_n, temp_nn, sigma_predict)
+        sample_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
+
+    return ll, np.asarray(randseq)
+
+
+def filter_and_sample_diagonal(
+    double[:] mu_init, double[:,:] sigma_init,
+    double[:,:,:] A, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:] sigma_obs,
+    double[:,::1] data):
+
+    # allocate temporaries and internals
+    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int t
+
+    cdef double[::1] mu_predict = np.copy(mu_init)
+    cdef double[:,:] sigma_predict = np.copy(sigma_init)
+
+    cdef double[::1,:] temp_pn  = np.empty((p,n),  order='F')
+    cdef double[::1,:] temp_pn2 = np.empty((p,n),  order='F')
+    cdef double[::1,:] temp_pn3 = np.empty((p,n),  order='F')
+    cdef double[::1]   temp_p   = np.empty((p,),   order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),  order='F')
+    cdef double[::1]   temp_n   = np.empty((n,),   order='F')
+    cdef double[::1,:] temp_pk  = np.empty((p,n+1),order='F')
+    cdef double[::1,:] temp_nk  = np.empty((n,n+1),order='F')
+
+    cdef double[:,::1] filtered_mus = np.empty((T,n))
+    cdef double[:,:,::1] filtered_sigmas = np.empty((T,n,n))
+
+    # allocate output and generate randomness
+    cdef double[:,::1] randseq = np.random.randn(T,n)
+    cdef double ll = 0.
+
+    # run filter forwards
+    for t in range(T):
+        ll += condition_on_diagonal(
+            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            filtered_mus[t], filtered_sigmas[t],
+            temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
         predict(
             filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
             mu_predict, sigma_predict,
@@ -569,7 +623,7 @@ cdef inline void info_rts_backward_step(
     dcopy(&nn, &Jsmooth_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &neg1, &Jpred_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &one, &J22[0,0], &inc, &temp_nn[0,0], &inc)
-    copy_transpose(n, &J21[0,0], &temp_nn2[0,0])
+    copy_transpose(n, n, &J21[0,0], &temp_nn2[0,0])
 
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
@@ -602,6 +656,102 @@ cdef inline void info_to_distn(
     dgemv('N', &n, &n, &one, &Sigma[0,0], &n, &h[0], &inc, &zero, &mu[0], &inc)
 
 
+cdef inline double condition_on_diagonal(
+    double[:] mu_x, double[:,:] sigma_x,
+    double[:,:] C, double[:] sigma_obs, double[:] y,
+    double[:] mu_cond, double[:,:] sigma_cond,
+    double[::1] temp_p, double[::1,:] temp_nn,
+    double[::1,:] temp_pn, double[::1,:] temp_pn2, double[::1,:] temp_pn3,
+    double[::1,:] temp_pk, double[::1,:] temp_nk,
+    ) nogil:
+
+    # see Boyd and Vandenberghe, Convex Optimization, Appendix C.4.3 (p. 679)
+    # and also https://en.wikipedia.org/wiki/Woodbury_matrix_identity
+    # and https://en.wikipedia.org/wiki/Matrix_determinant_lemma
+
+    # an extra temp (temp_pn3) and an extra copy_transpose are needed because C
+    # is not stored in Fortran order as solve_diagonal_plus_lowrank requires
+
+    cdef int p = C.shape[0], n = C.shape[1]
+    cdef int nn = n*n, pn = p*n
+    cdef int inc = 1, info = 0, i
+    cdef double one = 1., zero = 0., neg1 = -1., ll = 0.
+
+    if y[0] != y[0]:  # nan check
+        dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
+        dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
+        return 0.
+    else:
+        # NOTE: the C arguments are treated as transposed because C is
+        # assumed to be in C order
+
+        dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
+        dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
+        dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
+        copy_transpose(n, p, &C[0,0], &temp_pn3[0,0])
+        dcopy(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
+        dcopy(&pn, &temp_pn[0,0], &inc, &temp_pk[0,1], &inc)
+
+        ll = -1./2 * solve_diagonal_plus_lowrank(
+            sigma_obs, temp_pn3, sigma_x, temp_pk, False,
+            temp_nn, temp_pn2, temp_nk)
+
+        if (&mu_x[0] != &mu_cond[0]):
+            dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
+        dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_pk[0,0], &inc, &one, &mu_cond[0], &inc)
+
+        if (&sigma_x[0,0] != &sigma_cond[0,0]):
+            dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
+        dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pk[0,1], &p, &one, &sigma_cond[0,0], &n)
+
+        ll -= 1./2 * ddot(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
+        ll -= p/2. * log(2*PI)
+        return ll
+
+
+cdef inline double solve_diagonal_plus_lowrank(
+    double[:] a, double[:,:] B, double[:,:] C, double[:,:] b, bint C_is_identity,
+    double[:,:] temp_nn, double[:,:] temp_pn, double[:,:] temp_nk,
+    ) nogil:
+    cdef int p = B.shape[0], n = B.shape[1], k = b.shape[1]
+    cdef int nn = n*n, inc = 1, info = 0, i, j
+    cdef double one = 1., zero = 0., neg1 = -1., logdet = 0.
+
+    # NOTE: on exit, temp_nn is guaranteed to hold chol(C^{-1} + B' A^{-1} B)
+    # NOTE: assumes Fortran order for everything
+
+    for j in range(k):
+        for i in range(p):
+            b[i,j] /= a[i]
+            # (&b[0,0])[i+p*j] /= (&a[0])[i]
+
+    for j in range(n):
+        for i in range(p):
+            temp_pn[i,j] = B[i,j] / a[i]
+            # (&temp_pn[0,0])[i+p*j] = (&B[0,0])[i+p*j] / (&a[0])[i]
+
+    dcopy(&nn, &C[0,0], &inc, &temp_nn[0,0], &inc)
+    if not C_is_identity:
+        dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+        for i in range(n):
+            logdet += 2.*log(temp_nn[i,i])
+        dpotri('L', &n, &temp_nn[0,0], &n, &info)
+    dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &one, &temp_nn[0,0], &n)
+    dpotrf('L', &n, &temp_nn[0,0], &n, &info)
+
+    dgemm('T', 'N', &n, &k, &p, &one, &B[0,0], &p, &b[0,0], &p, &zero, &temp_nk[0,0], &n)
+    dpotrs('L', &n, &k, &temp_nn[0,0], &n, &temp_nk[0,0], &n, &info)
+
+    dgemm('N', 'N', &p, &k, &n, &neg1, &temp_pn[0,0], &p, &temp_nk[0,0], &n, &one, &b[0,0], &p)
+
+    for i in range(n):
+        logdet += 2.*log(temp_nn[i,i])
+    for i in range(p):
+        logdet += log(a[i])
+
+    return logdet
+
+
 ### testing
 
 def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
@@ -623,4 +773,35 @@ def info_rts_test(
           J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
           hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
           temp_n, temp_nn, temp_nn2)
+
+
+def test_condition_on_diagonal(
+    double[:] mu_x, double[:,:] sigma_x,
+    double[:,:] C, double[:] sigma_obs, double[:] y,
+    double[:] mu_cond, double[:,:] sigma_cond):
+    p = y.shape[0]
+    n = mu_x.shape[0]
+    k = n+1
+    temp_p   = np.asfortranarray(np.random.randn(p))
+    temp_nn  = np.asfortranarray(np.random.randn(n,n))
+    temp_pn  = np.asfortranarray(np.random.randn(p,n))
+    temp_pn2 = np.asfortranarray(np.random.randn(p,n))
+    temp_pn3 = np.asfortranarray(np.random.randn(p,n))
+    temp_pk  = np.asfortranarray(np.random.randn(p,k))
+    temp_nk  = np.asfortranarray(np.random.randn(n,k))
+    return condition_on_diagonal(
+        mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond,
+        temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
+
+
+def test_solve_diagonal_plus_lowrank(
+    double[:] a, double[::1,:] B, double[:,:] C, bint C_is_identity,
+    double[::1,:] b):
+    p = B.shape[0]
+    n = B.shape[1]
+    k = b.shape[1]
+    temp_nn = np.asfortranarray(np.random.randn(n,n))
+    temp_pn = np.asfortranarray(np.random.randn(p,n))
+    temp_nk = np.asfortranarray(np.random.randn(n,k))
+    return solve_diagonal_plus_lowrank(a,B,C,b,C_is_identity,temp_nn,temp_pn,temp_nk)
 
