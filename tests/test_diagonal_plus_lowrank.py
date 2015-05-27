@@ -4,6 +4,8 @@ from numpy.random import rand, randn, randint
 from scipy.stats import multivariate_normal
 
 from pylds.lds_messages import test_solve_diagonal_plus_lowrank, test_condition_on_diagonal
+from pylds.lds_messages_interface import filter_and_sample, filter_and_sample_diagonal
+from test_infofilter import generate_data, spectral_radius
 
 
 # TODO test filtering
@@ -18,6 +20,23 @@ def rand_psd(n,k=None):
     k = k if k else n
     out = randn(n,k)
     return np.atleast_2d(out.dot(out.T))
+
+
+def generate_diag_model(n,p):
+    A = randn(n,n)
+    A /= 2.*spectral_radius(A)  # ensures stability
+    assert spectral_radius(A) < 1.
+
+    B = randn(n,n)
+    C = randn(p,n)
+    d = rand(p)
+
+    mu_init = randn(n)
+    sigma_init = rand_psd(n)
+
+    return A, B, C, d, mu_init, sigma_init
+
+
 
 
 ###########
@@ -97,5 +116,27 @@ def test_cython_condition_on_diagonal():
         y = randn(p)
 
         yield check_condition_on_diagonal, mu_x, sigma_x, C, sigma_obs, y
+
+
+# test filter_and_sample
+
+def check_filter_and_sample(A, B, C, d, mu_init, sigma_init, data):
+    rngstate = np.random.get_state()
+    ll1, sample1 = filter_and_sample(
+        mu_init, sigma_init, A, B.dot(B.T), C, np.diag(d**2), data)
+    np.random.set_state(rngstate)
+    ll2, sample2 = filter_and_sample_diagonal(
+        mu_init, sigma_init, A, B.dot(B.T), C, d**2, data)
+
+    assert np.isclose(ll1, ll2)
+    assert np.allclose(sample1, sample2)
+
+
+def test_filter_and_sample():
+    for _ in xrange(5):
+        n, p, T = randint(1,5), randint(1,5), randint(10,20)
+        model = generate_diag_model(n,p)
+        data = generate_data(*(model + (T,)))
+        yield (check_filter_and_sample,) + model + (data,)
 
 

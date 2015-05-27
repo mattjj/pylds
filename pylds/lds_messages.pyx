@@ -656,29 +656,6 @@ cdef inline void info_to_distn(
     dgemv('N', &n, &n, &one, &Sigma[0,0], &n, &h[0], &inc, &zero, &mu[0], &inc)
 
 
-### testing
-
-def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
-    temp_n = np.random.randn(*h.shape)
-    temp_nn = np.random.randn(*J.shape)
-    temp_nn2 = np.random.randn(*J.shape)
-
-    return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
-
-
-def info_rts_test(
-        J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, hfilt_t,
-        hsmooth_tp1, mu_t, sigma_t, Cov_xnx):
-    temp_n = np.random.randn(*mu_t.shape)
-    temp_nn = np.random.randn(*sigma_t.shape)
-    temp_nn2 = np.random.randn(*sigma_t.shape)
-
-    return info_rts_backward_step(
-          J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
-          hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
-          temp_n, temp_nn, temp_nn2)
-
-
 cdef inline double condition_on_diagonal(
     double[:] mu_x, double[:,:] sigma_x,
     double[:,:] C, double[:] sigma_obs, double[:] y,
@@ -708,29 +685,21 @@ cdef inline double condition_on_diagonal(
         # NOTE: the C arguments are treated as transposed because C is
         # assumed to be in C order
 
-        # temp_p = y - C mu_x
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
-        # temp_pn = B = C sigma_x
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
-        # temp_pn3 = C (in Fortran order), only necessary b/c caller uses C order
         copy_transpose(n, p, &C[0,0], &temp_pn3[0,0])
-        # temp_pk[:,0] = temp_p
         dcopy(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
-        # temp_pk[:,1:] = temp_pn
         dcopy(&pn, &temp_pn[0,0], &inc, &temp_pk[0,1], &inc)
 
-        # temp_pk = (sigma_obs + C sigma_x C')^{-1} temp_pk
         ll = -1./2 * solve_diagonal_plus_lowrank(
             sigma_obs, temp_pn3, sigma_x, temp_pk, False,
             temp_nn, temp_pn2, temp_nk)
 
-        # mu_cond = mu_x + B' temp_pn[:,0]
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
         dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_pk[0,0], &inc, &one, &mu_cond[0], &inc)
 
-        # sigma_cond = sigma_x - B' temp_pk[:,1:]
         if (&sigma_x[0,0] != &sigma_cond[0,0]):
             dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
         dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pk[0,1], &p, &one, &sigma_cond[0,0], &n)
@@ -751,19 +720,16 @@ cdef inline double solve_diagonal_plus_lowrank(
     # NOTE: on exit, temp_nn is guaranteed to hold chol(C^{-1} + B' A^{-1} B)
     # NOTE: assumes Fortran order for everything
 
-    # z = A^{-1} b (stored in b)
     for j in range(k):
         for i in range(p):
             b[i,j] /= a[i]
             # (&b[0,0])[i+p*j] /= (&a[0])[i]
 
-    # temp_pn = A^{-1} B
     for j in range(n):
         for i in range(p):
             temp_pn[i,j] = B[i,j] / a[i]
             # (&temp_pn[0,0])[i+p*j] = (&B[0,0])[i+p*j] / (&a[0])[i]
 
-    # temp_nn = chol(E) = chol(C^{-1} + B' A^{-1} B)
     dcopy(&nn, &C[0,0], &inc, &temp_nn[0,0], &inc)
     if not C_is_identity:
         dpotrf('L', &n, &temp_nn[0,0], &n, &info)
@@ -773,11 +739,9 @@ cdef inline double solve_diagonal_plus_lowrank(
     dgemm('T', 'N', &n, &n, &p, &one, &B[0,0], &p, &temp_pn[0,0], &p, &one, &temp_nn[0,0], &n)
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
 
-    # temp_nk = w = solve(E, B' z)
     dgemm('T', 'N', &n, &k, &p, &one, &B[0,0], &p, &b[0,0], &p, &zero, &temp_nk[0,0], &n)
     dpotrs('L', &n, &k, &temp_nn[0,0], &n, &temp_nk[0,0], &n, &info)
 
-    # x = z - A^{-1} B w (stored in b)
     dgemm('N', 'N', &p, &k, &n, &neg1, &temp_pn[0,0], &p, &temp_nk[0,0], &n, &one, &b[0,0], &p)
 
     for i in range(n):
@@ -786,6 +750,29 @@ cdef inline double solve_diagonal_plus_lowrank(
         logdet += log(a[i])
 
     return logdet
+
+
+### testing
+
+def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
+    temp_n = np.random.randn(*h.shape)
+    temp_nn = np.random.randn(*J.shape)
+    temp_nn2 = np.random.randn(*J.shape)
+
+    return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
+
+
+def info_rts_test(
+        J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, hfilt_t,
+        hsmooth_tp1, mu_t, sigma_t, Cov_xnx):
+    temp_n = np.random.randn(*mu_t.shape)
+    temp_nn = np.random.randn(*sigma_t.shape)
+    temp_nn2 = np.random.randn(*sigma_t.shape)
+
+    return info_rts_backward_step(
+          J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
+          hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
+          temp_n, temp_nn, temp_nn2)
 
 
 def test_condition_on_diagonal(
