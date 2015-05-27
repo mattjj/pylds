@@ -769,10 +769,10 @@ def info_rts_test(
     temp_nn = np.random.randn(*sigma_t.shape)
     temp_nn2 = np.random.randn(*sigma_t.shape)
 
-    return info_rts_backward_step(
-          J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
-          hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
-          temp_n, temp_nn, temp_nn2)
+    info_rts_backward_step(
+        J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
+        hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
+        temp_n, temp_nn, temp_nn2)
 
 
 def test_condition_on_diagonal(
