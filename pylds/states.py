@@ -55,7 +55,7 @@ class LDSStates(object):
 
         return stateseq
 
-    def sample_predictions(self, Tpred, Npred):
+    def sample_predictions(self, Tpred, Npred, obs_noise=True):
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init, self.A, self.sigma_states, self.C,
             self.sigma_obs, self.data)
@@ -71,11 +71,12 @@ class LDSStates(object):
         for t in xrange(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + randseq[t-1]
 
-        randseq = np.einsum(
-            'tjn,ij->tin',
-            np.random.randn(Tpred, self.p, Npred),
-            np.linalg.cholesky(self.sigma_obs))
-        obs = np.einsum('ij,tjn->tin', self.C, states) + randseq
+        obs = np.einsum('ij,tjn->tin', self.C, states)
+        if obs_noise:
+            obs += np.einsum(
+                'tjn,ij->tin',
+                np.random.randn(Tpred, self.p, Npred),
+                np.linalg.cholesky(self.sigma_obs))
 
         return obs
 
