@@ -11,6 +11,7 @@ from lds_messages import \
     kalman_filter as _kalman_filter, \
     rts_smoother as _rts_smoother, \
     filter_and_sample as _filter_and_sample, \
+    kalman_filter_diagonal as _kalman_filter_diagonal, \
     filter_and_sample_diagonal as _filter_and_sample_diagonal, \
     E_step as _E_step
 
@@ -55,6 +56,7 @@ kalman_filter = _wrap(_kalman_filter,_argcheck)
 rts_smoother = _wrap(_rts_smoother,_argcheck)
 filter_and_sample = _wrap(_filter_and_sample,_argcheck)
 E_step = _wrap(_E_step,_argcheck)
+kalman_filter_diagonal = _wrap(_kalman_filter_diagonal,_argcheck_diag_sigma_obs)
 filter_and_sample_diagonal = _wrap(_filter_and_sample_diagonal,_argcheck_diag_sigma_obs)
 
 
