@@ -166,6 +166,46 @@ def filter_and_sample(
     return ll, np.asarray(randseq)
 
 
+def kalman_filter_diagonal(
+    double[:] mu_init, double[:,:] sigma_init,
+    double[:,:,:] A, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:] sigma_obs,
+    double[:,::1] data):
+
+    # allocate temporaries and internals
+    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int t
+
+    cdef double[::1] mu_predict = np.copy(mu_init)
+    cdef double[:,:] sigma_predict = np.copy(sigma_init)
+
+    cdef double[::1,:] temp_pn  = np.empty((p,n),  order='F')
+    cdef double[::1,:] temp_pn2 = np.empty((p,n),  order='F')
+    cdef double[::1,:] temp_pn3 = np.empty((p,n),  order='F')
+    cdef double[::1]   temp_p   = np.empty((p,),   order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),  order='F')
+    cdef double[::1,:] temp_pk  = np.empty((p,n+1),order='F')
+    cdef double[::1,:] temp_nk  = np.empty((n,n+1),order='F')
+
+    # allocate output
+    cdef double[:,::1] filtered_mus = np.empty((T,n))
+    cdef double[:,:,::1] filtered_sigmas = np.empty((T,n,n))
+    cdef double ll = 0.
+
+    # run filter forwards
+    for t in range(T):
+        ll += condition_on_diagonal(
+            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            filtered_mus[t], filtered_sigmas[t],
+            temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
+        predict(
+            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            mu_predict, sigma_predict,
+            temp_nn)
+
+    return ll, np.asarray(filtered_mus), np.asarray(filtered_sigmas)
+
+
 def filter_and_sample_diagonal(
     double[:] mu_init, double[:,:] sigma_init,
     double[:,:,:] A, double[:,:,:] sigma_states,
