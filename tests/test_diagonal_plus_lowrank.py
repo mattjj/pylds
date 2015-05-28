@@ -8,10 +8,6 @@ from pylds.lds_messages_interface import filter_and_sample, filter_and_sample_di
 from test_infofilter import generate_data, spectral_radius
 
 
-# TODO test filtering
-# TODO test logdet stuff
-
-
 ##########
 #  util  #
 ##########
