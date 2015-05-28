@@ -33,8 +33,6 @@ def generate_diag_model(n,p):
     return A, B, C, d, mu_init, sigma_init
 
 
-
-
 ###########
 #  tests  #
 ###########
@@ -87,10 +85,7 @@ def check_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
         mu = mu_x + sigma_xy.dot(np.linalg.solve(sigma_yy, y - mu_y))
         sigma = sigma_x - sigma_xy.dot(np.linalg.solve(sigma_yy,sigma_xy.T))
 
-        # ll = multivariate_normal.logpdf(y,mu_y,sigma_yy)
-        ll = -p/2. * np.log(2*np.pi)
-        ll -= 1./2 * (y - mu_y).dot(np.linalg.solve(sigma_yy, y - mu_y))
-        ll -= 1./2 * np.linalg.slogdet(sigma_yy)[1]
+        ll = multivariate_normal.logpdf(y,mu_y,sigma_yy)
 
         return ll, mu, sigma
 
