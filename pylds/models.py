@@ -1,8 +1,6 @@
 from __future__ import division
 import numpy as np
 
-import pydare
-
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField
 
@@ -79,8 +77,16 @@ class _LDSBase(Model):
 
     @property
     def sigma_init(self):
-        return pydare.dlyap(self.dynamics_distn.A, self.dynamics_distn.sigma) \
-            if not hasattr(self,'_sigma_init') else self._sigma_init
+        if hasattr(self,'_sigma_init'):
+            return self._sigma_init
+
+        try:
+            import pydare
+            return pydare.dlyap(self.A, self.sigma_states)
+        except ImportError:
+            return np.linalg.solve(
+                np.eye(self.n**2) - np.kron(self.A,self.A), self.sigma_states.ravel())\
+                .reshape(self.n,self.n)
 
     @sigma_init.setter
     def sigma_init(self,sigma_init):
