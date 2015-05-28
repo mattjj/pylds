@@ -4,13 +4,12 @@ from numpy.random import randn, randint
 
 from pylds.lds_messages_interface import kalman_filter, kalman_info_filter, \
     E_step, info_E_step
-from pylds.lds_messages import info_predict_test, info_rts_test
+from pylds.lds_info_messages import info_predict_test, info_rts_test
 
 
 ##########
 #  util  #
 ##########
-
 
 def blockarray(*args,**kwargs):
     return np.array(np.bmat(*args,**kwargs),copy=False)

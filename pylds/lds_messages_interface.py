@@ -62,7 +62,7 @@ filter_and_sample_diagonal = _wrap(_filter_and_sample_diagonal,_argcheck_diag_si
 #  information-form wrappers  #
 ###############################
 
-from lds_messages import \
+from lds_info_messages import \
     kalman_info_filter as _kalman_info_filter, \
     info_E_step as _info_E_step
 
