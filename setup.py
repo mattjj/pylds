@@ -5,7 +5,9 @@ from Cython.Build import cythonize
 setup(
     name='pylds',
     version='0.0.1',
-    description="Linear dynamical system inference and learning with fast Cython and BLAS implementations.",
+    description=
+    "Learning and inference for Gaussian linear dynamical systems"
+    "with fast Cython and BLAS implementations",
     author='Matthew James Johnson',
     author_email='mattjj@csail.mit.edu',
     license="MIT",
@@ -21,7 +23,8 @@ setup(
           'Programming Language :: Python',
           'Programming Language :: C++',
     ],
-    keywords=['lds', 'linear dynamical system', 'kalman filter', 'kalman'],
+    keywords=['lds', 'linear dynamical system', 'kalman filter', 'kalman',
+              'kalman smoother', 'rts smoother'],
     platforms="ALL",
 )
 
