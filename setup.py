@@ -7,7 +7,7 @@ setup(
     version='0.0.1',
     description=
     "Learning and inference for Gaussian linear dynamical systems"
-    "with fast Cython and BLAS implementations",
+    "with fast Cython and BLAS/LAPACK implementations",
     author='Matthew James Johnson',
     author_email='mattjj@csail.mit.edu',
     license="MIT",
@@ -19,12 +19,12 @@ setup(
     ext_modules=cythonize('pylds/**/*.pyx'),
     include_dirs=[np.get_include(),],
     classifiers=[
-          'Intended Audience :: Science/Research',
-          'Programming Language :: Python',
-          'Programming Language :: C++',
+        'Intended Audience :: Science/Research',
+        'Programming Language :: Python',
+        'Programming Language :: C++',
     ],
-    keywords=['lds', 'linear dynamical system', 'kalman filter', 'kalman',
-              'kalman smoother', 'rts smoother'],
+    keywords=[
+        'lds', 'linear dynamical system', 'kalman filter', 'kalman',
+        'kalman smoother', 'rts smoother'],
     platforms="ALL",
 )
-
