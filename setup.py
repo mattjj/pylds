@@ -7,7 +7,7 @@ setup(
     version='0.0.1',
     description=
     "Learning and inference for Gaussian linear dynamical systems"
-    "with fast Cython and BLAS/LAPACK implementations",
+    " with fast Cython and BLAS/LAPACK implementations",
     author='Matthew James Johnson',
     author_email='mattjj@csail.mit.edu',
     license="MIT",
