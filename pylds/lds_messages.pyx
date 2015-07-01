@@ -166,6 +166,65 @@ def filter_and_sample(
     return ll, np.asarray(randseq)
 
 
+def E_step(
+    double[:] mu_init, double[:,:] sigma_init,
+    double[:,:,:] A, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] sigma_obs,
+    double[:,::1] data):
+
+    # NOTE: this is almost the same as the RTS smoother except
+    #   1. we collect statistics along the way, and
+    #   2. we use the RTS gain matrix to do it
+
+    # allocate temporaries and internals
+    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int t
+
+    cdef double[:,:] mu_predicts = np.empty((T+1,n))
+    cdef double[:,:,:] sigma_predicts = np.empty((T+1,n,n))
+
+    cdef double[::1,:] temp_pp  = np.empty((p,p),order='F')
+    cdef double[::1,:] temp_pn  = np.empty((p,n),order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
+    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
+    cdef double[::1]   temp_p   = np.empty((p,), order='F')
+
+    # allocate output
+    cdef double[:,::1] smoothed_mus = np.empty((T,n))
+    cdef double[:,:,::1] smoothed_sigmas = np.empty((T,n,n))
+    cdef double[:,:,::1] ExnxT = np.empty((T-1,n,n))  # 'n' for next
+    cdef double ll = 0.
+
+    # run filter forwards, saving predictions
+    mu_predicts[0] = mu_init
+    sigma_predicts[0] = sigma_init
+    for t in range(T):
+        ll += condition_on(
+            mu_predicts[t], sigma_predicts[t], C[t], sigma_obs[t], data[t],
+            smoothed_mus[t], smoothed_sigmas[t],
+            temp_p, temp_pn, temp_pp)
+        predict(
+            smoothed_mus[t], smoothed_sigmas[t], A[t], sigma_states[t],
+            mu_predicts[t+1], sigma_predicts[t+1],
+            temp_nn)
+
+    # run rts update backwards, using predictions and setting E[x_t x_{t+1}^T]
+    for t in range(T-2,-1,-1):
+        rts_backward_step(
+            A[t], sigma_states[t],
+            smoothed_mus[t], smoothed_sigmas[t],
+            mu_predicts[t+1], sigma_predicts[t+1],
+            smoothed_mus[t+1], smoothed_sigmas[t+1],
+            temp_nn, temp_nn2)
+        set_dynamics_stats(
+            smoothed_mus[t], smoothed_mus[t+1], smoothed_sigmas[t+1],
+            temp_nn, ExnxT[t])
+
+    return ll, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(ExnxT)
+
+
+### diagonal emission distributions
+
 def kalman_filter_diagonal(
     double[:] mu_init, double[:,:] sigma_init,
     double[:,:,:] A, double[:,:,:] sigma_states,
@@ -258,61 +317,44 @@ def filter_and_sample_diagonal(
     return ll, np.asarray(randseq)
 
 
-def E_step(
-    double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:,:] sigma_obs,
-    double[:,::1] data):
+### random walk, diagonal dynamcis and emission distributions
 
-    # NOTE: this is almost the same as the RTS smoother except
-    #   1. we collect statistics along the way, and
-    #   2. we use the RTS gain matrix to do it
+def filter_and_sample_randomwalk(
+    double[::1] mu_init, double[::1] sigma_init, double[:,::1] sigma_states,
+    double[:,::1] sigma_obs, double[:,::1] data):
 
     # allocate temporaries and internals
-    cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
+    cdef int T = data.shape[0], n = data.shape[1]
     cdef int t
 
-    cdef double[:,:] mu_predicts = np.empty((T+1,n))
-    cdef double[:,:,:] sigma_predicts = np.empty((T+1,n,n))
+    cdef double[::1] mu_predict = np.copy(mu_init)
+    cdef double[::1] sigma_predict = np.copy(sigma_init)
 
-    cdef double[::1,:] temp_pp  = np.empty((p,p),order='F')
-    cdef double[::1,:] temp_pn  = np.empty((p,n),order='F')
-    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
-    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
-    cdef double[::1]   temp_p   = np.empty((p,), order='F')
+    cdef double[:,::1] filtered_mus = np.empty((T,n))
+    cdef double[:,::1] filtered_sigmas = np.empty((T,n))
 
-    # allocate output
-    cdef double[:,::1] smoothed_mus = np.empty((T,n))
-    cdef double[:,:,::1] smoothed_sigmas = np.empty((T,n,n))
-    cdef double[:,:,::1] ExnxT = np.empty((T-1,n,n))  # 'n' for next
+    # allocate output and generate randomness
+    cdef double[:,::1] randseq = np.random.randn(T,n)
     cdef double ll = 0.
 
-    # run filter forwards, saving predictions
-    mu_predicts[0] = mu_init
-    sigma_predicts[0] = sigma_init
+    # run filter forwards
     for t in range(T):
-        ll += condition_on(
-            mu_predicts[t], sigma_predicts[t], C[t], sigma_obs[t], data[t],
-            smoothed_mus[t], smoothed_sigmas[t],
-            temp_p, temp_pn, temp_pp)
-        predict(
-            smoothed_mus[t], smoothed_sigmas[t], A[t], sigma_states[t],
-            mu_predicts[t+1], sigma_predicts[t+1],
-            temp_nn)
+        ll += condition_on_randomwalk(
+            mu_predict, sigma_predict, sigma_obs[t], data[t],
+            filtered_mus[t], filtered_sigmas[t])
+        predict_randomwalk(
+            filtered_mus[t], filtered_sigmas[t], sigma_states[t],
+            mu_predict, sigma_predict)
 
-    # run rts update backwards, using predictions and setting E[x_t x_{t+1}^T]
+    # sample backwards
+    sample_diagonal_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
     for t in range(T-2,-1,-1):
-        rts_backward_step(
-            A[t], sigma_states[t],
-            smoothed_mus[t], smoothed_sigmas[t],
-            mu_predicts[t+1], sigma_predicts[t+1],
-            smoothed_mus[t+1], smoothed_sigmas[t+1],
-            temp_nn, temp_nn2)
-        set_dynamics_stats(
-            smoothed_mus[t], smoothed_mus[t+1], smoothed_sigmas[t+1],
-            temp_nn, ExnxT[t])
+        condition_on_randomwalk(
+            filtered_mus[t], filtered_sigmas[t], sigma_states[t], randseq[t+1],
+            filtered_mus[t], filtered_sigmas[t])
+        sample_diagonal_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
 
-    return ll, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(ExnxT)
+    return ll, np.asarray(randseq)
 
 
 ############################
@@ -449,6 +491,8 @@ cdef inline void set_dynamics_stats(
     dger(&n, &n, &one, &mk[0], &inc, &mkn[0], &inc, &ExnxT[0,0], &n)
 
 
+### diagonal emission distributions
+
 cdef inline double condition_on_diagonal(
     double[:] mu_x, double[:,:] sigma_x,
     double[:,:] C, double[:] sigma_obs, double[:] y,
@@ -541,6 +585,43 @@ cdef inline double solve_diagonal_plus_lowrank(
         logdet += log(a[i])
 
     return logdet
+
+
+### diagonal dynamcis and emission distributions (C = I)
+
+cdef inline double condition_on_randomwalk(
+    double[::1] mu_x, double[::1] sigmasq_x,
+    double[::1] sigmasq_obs, double[::1] y,
+    double[::1] mu_cond, double[::1] sigmasq_cond,
+    ) nogil:
+    cdef int n = mu_x.shape[0]
+    cdef int i
+
+    for i in range(n):
+        mu_cond[i] = mu_x[i] + (y[i] - mu_x[i]) / sigmasq_obs[i]
+        sigmasq_cond[i] = sigmasq_x[i] - sigmasq_obs[i]
+
+
+cdef inline double predict_randomwalk(
+    double[::1] mu, double[::1] sigmasq, double[::1] sigmasq_states,
+    double[::1] mu_predict, double[::1] sigmasq_predict,
+    ) nogil:
+    cdef int n = mu.shape[0]
+    cdef int i
+
+    for i in range(n):
+        mu_predict[i] = mu[i]
+        sigmasq_predict[i] = sigmasq[i] + sigmasq_states[i]
+
+
+cdef inline double sample_diagonal_gaussian(
+    double[::1] mu, double [::1] sigmasq, double[::1] randvec,
+    ) nogil:
+    cdef int n = mu.shape[0]
+    cdef int i
+
+    for i in range(n):
+        randvec[i] = mu[i] + sqrt(sigmasq[i]) * randvec[i]
 
 
 ###################
