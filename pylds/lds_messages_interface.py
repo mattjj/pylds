@@ -13,6 +13,7 @@ from lds_messages import \
     filter_and_sample as _filter_and_sample, \
     kalman_filter_diagonal as _kalman_filter_diagonal, \
     filter_and_sample_diagonal as _filter_and_sample_diagonal, \
+    filter_and_sample_randomwalk as _filter_and_sample_randomwalk, \
     E_step as _E_step
 
 
@@ -45,6 +46,15 @@ def _argcheck_diag_sigma_obs(mu_init, sigma_init, A, sigma_states, C, sigma_obs,
     return mu_init, sigma_init, A, sigma_states, C, sigma_obs, data
 
 
+def _argcheck_randomwalk(mu_init, sigma_init, sigmasq_states, sigmasq_obs, data):
+    T = data.shape[0]
+    sigmasq_states, sigmasq_obs = \
+        map(partial(_ensure_ndim, T=T, ndim=2),
+            [sigmasq_states, sigmasq_obs])
+    data = np.require(data, dtype=np.float64, requirements='C')
+    return mu_init, sigma_init, sigmasq_states, sigmasq_obs, data
+
+
 def _wrap(func, check):
     @wraps(func)
     def wrapped(*args, **kwargs):
@@ -58,6 +68,7 @@ filter_and_sample = _wrap(_filter_and_sample,_argcheck)
 E_step = _wrap(_E_step,_argcheck)
 kalman_filter_diagonal = _wrap(_kalman_filter_diagonal,_argcheck_diag_sigma_obs)
 filter_and_sample_diagonal = _wrap(_filter_and_sample_diagonal,_argcheck_diag_sigma_obs)
+filter_and_sample_randomwalk = _wrap(_filter_and_sample_randomwalk,_argcheck_randomwalk)
 
 
 ###############################

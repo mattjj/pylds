@@ -320,18 +320,18 @@ def filter_and_sample_diagonal(
 ### random walk, diagonal dynamcis and emission distributions
 
 def filter_and_sample_randomwalk(
-    double[::1] mu_init, double[::1] sigma_init, double[:,::1] sigma_states,
-    double[:,::1] sigma_obs, double[:,::1] data):
+    double[::1] mu_init, double[::1] sigmasq_init, double[:,:] sigmasq_states,
+    double[:,:] sigmasq_obs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = data.shape[0], n = data.shape[1]
     cdef int t
 
     cdef double[::1] mu_predict = np.copy(mu_init)
-    cdef double[::1] sigma_predict = np.copy(sigma_init)
+    cdef double[::1] sigmasq_predict = np.copy(sigmasq_init)
 
     cdef double[:,::1] filtered_mus = np.empty((T,n))
-    cdef double[:,::1] filtered_sigmas = np.empty((T,n))
+    cdef double[:,::1] filtered_sigmasqs = np.empty((T,n))
 
     # allocate output and generate randomness
     cdef double[:,::1] randseq = np.random.randn(T,n)
@@ -340,19 +340,19 @@ def filter_and_sample_randomwalk(
     # run filter forwards
     for t in range(T):
         ll += condition_on_randomwalk(
-            mu_predict, sigma_predict, sigma_obs[t], data[t],
-            filtered_mus[t], filtered_sigmas[t])
+            n, &mu_predict[0], &sigmasq_predict[0], &sigmasq_obs[t,0], &data[t,0],
+            &filtered_mus[t,0], &filtered_sigmasqs[t,0])
         predict_randomwalk(
-            filtered_mus[t], filtered_sigmas[t], sigma_states[t],
-            mu_predict, sigma_predict)
+            n, &filtered_mus[t,0], &filtered_sigmasqs[t,0], &sigmasq_states[t,0],
+            &mu_predict[0], &sigmasq_predict[0])
 
     # sample backwards
-    sample_diagonal_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
+    sample_diagonal_gaussian(n, &filtered_mus[T-1,0], &filtered_sigmasqs[T-1,0], &randseq[T-1,0])
     for t in range(T-2,-1,-1):
         condition_on_randomwalk(
-            filtered_mus[t], filtered_sigmas[t], sigma_states[t], randseq[t+1],
-            filtered_mus[t], filtered_sigmas[t])
-        sample_diagonal_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
+            n, &filtered_mus[t,0], &filtered_sigmasqs[t,0], &sigmasq_states[t,0], &randseq[t+1,0],
+            &filtered_mus[t,0], &filtered_sigmasqs[t,0])
+        sample_diagonal_gaussian(n, &filtered_mus[t,0], &filtered_sigmasqs[t,0], &randseq[t,0])
 
     return ll, np.asarray(randseq)
 
@@ -587,39 +587,49 @@ cdef inline double solve_diagonal_plus_lowrank(
     return logdet
 
 
-### diagonal dynamcis and emission distributions (C = I)
+### identity dynamics and emission distributions (A = I, C = I)
+
+# NOTE: we have to use raw pointers here because numpy (and hence cython's typed
+# memoryview checks) doesn't count arrays with a zero stride as possibly being
+# C-contiguous
 
 cdef inline double condition_on_randomwalk(
-    double[::1] mu_x, double[::1] sigmasq_x,
-    double[::1] sigmasq_obs, double[::1] y,
-    double[::1] mu_cond, double[::1] sigmasq_cond,
+    int n,
+    double *mu_x, double *sigmasq_x,
+    double *sigmasq_obs, double *y,
+    double *mu_cond, double *sigmasq_cond,
     ) nogil:
-    cdef int n = mu_x.shape[0]
-    cdef int i
 
+    cdef double ll = -n/2. * log(2.*PI), sigmasq_yi
+    cdef int i
     for i in range(n):
-        mu_cond[i] = mu_x[i] + (y[i] - mu_x[i]) / sigmasq_obs[i]
-        sigmasq_cond[i] = sigmasq_x[i] - sigmasq_obs[i]
+        sigmasq_yi = sigmasq_x[i] + sigmasq_obs[i]
+        ll -= 1./2 * log(sigmasq_yi)
+        ll -= 1./2 * (y[i] - mu_x[i])**2 / sigmasq_yi
+        mu_cond[i] = mu_x[i] + sigmasq_x[i] / sigmasq_yi * (y[i] - mu_x[i])
+        sigmasq_cond[i] = sigmasq_x[i] - sigmasq_x[i]**2 / sigmasq_yi
+
+    return ll
 
 
-cdef inline double predict_randomwalk(
-    double[::1] mu, double[::1] sigmasq, double[::1] sigmasq_states,
-    double[::1] mu_predict, double[::1] sigmasq_predict,
+cdef inline void predict_randomwalk(
+    int n,
+    double *mu, double *sigmasq, double *sigmasq_states,
+    double *mu_predict, double *sigmasq_predict,
     ) nogil:
-    cdef int n = mu.shape[0]
-    cdef int i
 
+    cdef int i
     for i in range(n):
         mu_predict[i] = mu[i]
         sigmasq_predict[i] = sigmasq[i] + sigmasq_states[i]
 
 
-cdef inline double sample_diagonal_gaussian(
-    double[::1] mu, double [::1] sigmasq, double[::1] randvec,
+cdef inline void sample_diagonal_gaussian(
+    int n,
+    double *mu, double  *sigmasq, double *randvec,
     ) nogil:
-    cdef int n = mu.shape[0]
-    cdef int i
 
+    cdef int i
     for i in range(n):
         randvec[i] = mu[i] + sqrt(sigmasq[i]) * randvec[i]
 
