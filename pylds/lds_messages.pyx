@@ -223,7 +223,7 @@ def E_step(
     return ll, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(ExnxT)
 
 
-### diagonal emission distributions
+### diagonal emission distributions (D is diagonal)
 
 def kalman_filter_diagonal(
     double[:] mu_init, double[:,:] sigma_init,
@@ -317,7 +317,7 @@ def filter_and_sample_diagonal(
     return ll, np.asarray(randseq)
 
 
-### random walk, diagonal dynamcis and emission distributions
+### random walk (A = I, B is diagonal, C = I, D is diagonal)
 
 def filter_and_sample_randomwalk(
     double[::1] mu_init, double[::1] sigmasq_init, double[:,:] sigmasq_states,
