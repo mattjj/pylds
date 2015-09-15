@@ -7,7 +7,7 @@ from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
     info_E_step
 
 
-def extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
+def info_extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
     p, n = C.shape
     T = data.shape[0]
     out = 0.

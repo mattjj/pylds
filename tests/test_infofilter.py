@@ -5,7 +5,7 @@ from numpy.random import randn, randint
 from pylds.lds_messages_interface import kalman_filter, kalman_info_filter, \
     E_step, info_E_step
 from pylds.lds_info_messages import info_predict_test, info_rts_test
-from pylds.states import extra_loglike_terms
+from pylds.states import info_extra_loglike_terms
 
 
 ##########
@@ -277,7 +277,7 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, filtered_Js, filtered_hs = kalman_info_filter(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + extra_loglike_terms(
+    ll2 = partial_ll + info_extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
     filtered_sigmas2 = [np.linalg.inv(J) for J in filtered_Js]
@@ -311,7 +311,7 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, smoothed_mus2, smoothed_sigmas2, Covxxn = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + extra_loglike_terms(
+    ll2 = partial_ll + info_extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     ExnxT2 = Covxxn_to_ExnxT(Covxxn,smoothed_mus2)
 
