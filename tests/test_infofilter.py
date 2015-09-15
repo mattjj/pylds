@@ -5,7 +5,7 @@ from numpy.random import randn, randint
 from pylds.lds_messages_interface import kalman_filter, kalman_info_filter, \
     E_step, info_E_step
 from pylds.lds_info_messages import info_predict_test, info_rts_test
-from pylds.states import info_extra_loglike_terms
+from pylds.states import LDSStates
 
 
 ##########
@@ -122,6 +122,25 @@ def dense_infoparams(A, B, C, D, mu_init, sigma_init, data):
     assert h.shape == (T*n,)
 
     return J, h
+
+
+def extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
+    p, n = C.shape
+    T = data.shape[0]
+    out = 0.
+
+    out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
+    out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
+    out -= n/2. * np.log(2*np.pi)
+
+    out -= (T-1)/2. * np.linalg.slogdet(BBT)[1]
+    out -= (T-1)*n/2. * np.log(2*np.pi)
+
+    out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
+    out -= T/2. * np.linalg.slogdet(DDT)[1]
+    out -= T*p/2 * np.log(2*np.pi)
+
+    return out
 
 
 ##########################
@@ -277,7 +296,7 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, filtered_Js, filtered_hs = kalman_info_filter(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + info_extra_loglike_terms(
+    ll2 = partial_ll + extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
     filtered_sigmas2 = [np.linalg.inv(J) for J in filtered_Js]
@@ -311,7 +330,7 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, smoothed_mus2, smoothed_sigmas2, Covxxn = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + info_extra_loglike_terms(
+    ll2 = partial_ll + extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     ExnxT2 = Covxxn_to_ExnxT(Covxxn,smoothed_mus2)
 
@@ -327,3 +346,35 @@ def test_info_Estep():
         model = generate_model(n,p)
         data = generate_data(*(model + (T,)))
         yield (check_info_Estep,) + model + (data,)
+
+
+################################################
+#  test extra likelihood terms in info E step  #
+################################################
+
+def extra_info_params(A, B, C, D, mu_init, sigma_init, data):
+    J_init = np.linalg.inv(sigma_init)
+    h_init = np.linalg.solve(sigma_init, mu_init)
+
+    logdet_pair = -np.linalg.slogdet(B.dot(B.T))[1]
+    J_yy = np.linalg.inv(D.dot(D.T))
+    logdet_node = -np.linalg.slogdet(D.dot(D.T))[1]
+
+    return J_init, h_init, logdet_pair, J_yy, logdet_node, data
+
+
+def check_extra_loglike_terms(A, B, C, D, mu_init, sigma_init, data):
+    ex1 = extra_loglike_terms(
+        A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
+    ex2 = LDSStates._info_extra_loglike_terms(
+        *extra_info_params(A, B, C, D, mu_init, sigma_init, data))
+
+    assert np.isclose(ex1, ex2)
+
+
+def test_extra_loglike():
+    for _ in xrange(5):
+        n, p, T = randint(1,5), randint(1,5), randint(10,20)
+        model = generate_model(n,p)
+        data = generate_data(*(model + (T,)))
+        yield (check_extra_loglike_terms,) + model + (data,)
