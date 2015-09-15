@@ -3,3 +3,4 @@
 /pylds/*.c
 /pylds/*.so
 MANIFEST
+*.pyc
