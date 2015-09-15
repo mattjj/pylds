@@ -124,25 +124,6 @@ def dense_infoparams(A, B, C, D, mu_init, sigma_init, data):
     return J, h
 
 
-def extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
-    p, n = C.shape
-    T = data.shape[0]
-    out = 0.
-
-    out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
-    out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
-    out -= n/2. * np.log(2*np.pi)
-
-    out -= (T-1)/2. * np.linalg.slogdet(BBT)[1]
-    out -= (T-1)*n/2. * np.log(2*np.pi)
-
-    out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
-    out -= T/2. * np.linalg.slogdet(DDT)[1]
-    out -= T*p/2 * np.log(2*np.pi)
-
-    return out
-
-
 ##########################
 #  testing info_predict  #
 ##########################
@@ -296,7 +277,7 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, filtered_Js, filtered_hs = kalman_info_filter(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + extra_loglike_terms(
+    ll2 = partial_ll + LDSStates._extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     filtered_mus2 = [np.linalg.solve(J,h) for J, h in zip(filtered_Js, filtered_hs)]
     filtered_sigmas2 = [np.linalg.inv(J) for J in filtered_Js]
@@ -330,7 +311,7 @@ def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
     partial_ll, smoothed_mus2, smoothed_sigmas2, Covxxn = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
-    ll2 = partial_ll + extra_loglike_terms(
+    ll2 = partial_ll + LDSStates._extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     ExnxT2 = Covxxn_to_ExnxT(Covxxn,smoothed_mus2)
 
@@ -364,7 +345,7 @@ def extra_info_params(A, B, C, D, mu_init, sigma_init, data):
 
 
 def check_extra_loglike_terms(A, B, C, D, mu_init, sigma_init, data):
-    ex1 = extra_loglike_terms(
+    ex1 = LDSStates._extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
     ex2 = LDSStates._info_extra_loglike_terms(
         *extra_info_params(A, B, C, D, mu_init, sigma_init, data))

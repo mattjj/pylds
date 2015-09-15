@@ -137,7 +137,7 @@ class LDSStates(object):
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
 
-        EyyT = np.einsum('ti,tj->ij',self.data,self.data)  # TODO repetitive
+        EyyT = np.einsum('ti,tj->ij',self.data,self.data)
         EyxT = np.einsum('ti,tj->ij',self.data,smoothed_mus)
         ExxT = smoothed_sigmas.sum(0) + \
             np.einsum('ti,tj->ij',smoothed_mus,smoothed_mus)
