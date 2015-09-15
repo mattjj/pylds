@@ -55,7 +55,7 @@ class LDSStates(object):
 
         return stateseq
 
-    def sample_predictions(self, Tpred, obs_noise=True):
+    def sample_predictions(self, Tpred, states_noise, obs_noise):
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init, self.A, self.sigma_states, self.C,
             self.sigma_obs, self.data)
@@ -64,11 +64,13 @@ class LDSStates(object):
         init_sigma = self.sigma_states + self.A.dot(
             filtered_sigmas[-1]).dot(self.A.T)
 
-        randseq = np.einsum(
-            'tj,ij->ti', np.random.randn(Tpred-1, self.n),
-            np.linalg.cholesky(self.sigma_states))
-        states = np.empty((Tpred, self.n))
+        randseq = np.zeros((Tpred-1, self.n))
+        if states_noise:
+            randseq += np.einsum(
+                'tj,ij->ti', np.random.randn(Tpred-1, self.n),
+                np.linalg.cholesky(self.sigma_states))
 
+        states = np.empty((Tpred, self.n))
         states[0] = np.random.multivariate_normal(init_mu, init_sigma)
         for t in xrange(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + randseq[t-1]
@@ -149,19 +151,26 @@ class LDSStates(object):
 
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-        J_pair_22 = A.T.dot(np.linalg.solve(sigma_states, A))
+
+        J_pair_11 = A.T.dot(np.linalg.solve(sigma_states, A))
         J_pair_21 = -np.linalg.solve(sigma_states, A)
-        J_pair_11 = np.linalg.inv(sigma_states)
+        J_pair_22 = np.linalg.inv(sigma_states)
+
         J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
         h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-            E_xtp1_xtT = info_E_step(
+            covxxn = info_E_step(
                 J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
 
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
             self.mu_init, self.sigma_init, self.data)
+
+        E_xtp1_xtT = np.empty_like(covxxn)
+        mus = self.smoothed_mus
+        for out, cov, mu_t, mu_tp1 in zip(E_xtp1_xtT, covxxn, mus[:-1], mus[1:]):
+            out[...] = cov.T + np.outer(mu_tp1, mu_t)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)

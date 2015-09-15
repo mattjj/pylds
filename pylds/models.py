@@ -13,6 +13,7 @@ from states import LDSStates
 # emission_distn should probably be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
 
+
 ######################
 #  algorithm mixins  #
 ######################
@@ -58,10 +59,10 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self,data,Tpred,obs_noise=True):
-        self.add_data(data,generate=False)
+    def sample_predictions(self, data, Tpred, states_noise=True, obs_noise=True):
+        self.add_data(data, generate=False)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred,obs_noise=obs_noise)
+        return s.sample_predictions(Tpred, states_noise, obs_noise)
 
     # convenience properties
 
@@ -182,12 +183,10 @@ class _LDSMeanField(_LDSBase,ModelMeanField):
 
     def meanfield_update_dynamics_distn(self):
         self.dynamics_distn.meanfieldupdate(
-            data=None,
             stats=(sum(s.E_dynamics_stats for s in self.states_list)))
 
     def meanfield_update_emission_distn(self):
         self.emission_distn.meanfieldupdate(
-            data=None,
             stats=(sum(s.E_emission_stats for s in self.states_list)))
 
     def _vlb(self):
@@ -286,16 +285,18 @@ class NonstationaryLDS(
 ##############################
 
 # TODO make data-dependent default constructors
-# TODO make a constructor that takes A,B,C,D
+# TODO make a constructor that takes A, B, C, D
 
-from pybasicbayes.distributions import Regression, Gaussian
+from pybasicbayes.distributions import Regression
 from autoregressive.distributions import AutoRegression
 
 
 def DefaultLDS(n,p):
     model = LDS(
-        dynamics_distn=AutoRegression(nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
-        emission_distn=Regression(nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
+        dynamics_distn=AutoRegression(
+            nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
+        emission_distn=Regression(
+            nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
 
     model.A = 0.99*np.eye(n)
     model.sigma_states = np.eye(n)
@@ -303,4 +304,3 @@ def DefaultLDS(n,p):
     model.sigma_obs = 0.1*np.eye(p)
 
     return model
-
