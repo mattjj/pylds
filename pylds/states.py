@@ -162,15 +162,11 @@ class LDSStates(object):
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             covxxn = info_E_step(
                 J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
+        E_xtp1_xtT = self._cov_to_ExnxT(covxxn, self.smoothed_mus)
 
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
             self.mu_init, self.sigma_init, self.data)
-
-        E_xtp1_xtT = np.empty_like(covxxn)
-        mus = self.smoothed_mus
-        for out, cov, mu_t, mu_tp1 in zip(E_xtp1_xtT, covxxn, mus[:-1], mus[1:]):
-            out[...] = cov.T + np.outer(mu_tp1, mu_t)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
@@ -194,11 +190,18 @@ class LDSStates(object):
 
         return out
 
+    def _cov_to_ExnxT(self, covxxn, mus):
+        E_xtp1_xtT = np.empty_like(covxxn)
+        for out, cov, mu_t, mu_tp1 in zip(E_xtp1_xtT, covxxn, mus[:-1], mus[1:]):
+            out[...] = cov.T + np.outer(mu_tp1, mu_t)
+        return E_xtp1_xtT
+
     ### mean field
 
     def meanfieldupdate(self):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             self.dynamics_distn._mf_expected_statistics()
         J_yy, J_yx, J_node, logdet_node = \
@@ -206,8 +209,9 @@ class LDSStates(object):
         h_node = np.einsum('ti,ij->tj',self.data,J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-            E_xtp1_xtT = info_E_step(
-                J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
+            covxxn = info_E_step(
+                J_init,h_init,J_pair_11,-J_pair_21,J_pair_22,J_node,h_node)
+        E_xtp1_xtT = self._cov_to_ExnxT(covxxn, self.smoothed_mus)
 
         self._normalizer += self._info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
