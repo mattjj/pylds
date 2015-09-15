@@ -191,10 +191,8 @@ class LDSStates(object):
         return out
 
     def _cov_to_ExnxT(self, covxxn, mus):
-        E_xtp1_xtT = np.empty_like(covxxn)
-        for out, cov, mu_t, mu_tp1 in zip(E_xtp1_xtT, covxxn, mus[:-1], mus[1:]):
-            out[...] = cov.T + np.outer(mu_tp1, mu_t)
-        return E_xtp1_xtT
+        return np.swapaxes(covxxn, 1, 2) \
+            + np.einsum('ti,tj->tij', mus[1:], mus[:-1])
 
     ### mean field
 
@@ -206,7 +204,7 @@ class LDSStates(object):
             self.dynamics_distn._mf_expected_statistics()
         J_yy, J_yx, J_node, logdet_node = \
             self.emission_distn._mf_expected_statistics()
-        h_node = np.einsum('ti,ij->tj',self.data,J_yx)
+        h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             covxxn = info_E_step(
@@ -220,7 +218,7 @@ class LDSStates(object):
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     def get_vlb(self):
-        if hasattr(self,'_normalizer'):
+        if not hasattr(self,'_normalizer'):
             self.meanfieldupdate()  # NOTE: sets self._normalizer
         return self._normalizer
 

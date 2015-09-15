@@ -14,6 +14,7 @@ from states import LDSStates
 # init_dynamics_distn should probably be an instance of Gaussian
 
 
+
 ######################
 #  algorithm mixins  #
 ######################
