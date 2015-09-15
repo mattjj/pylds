@@ -91,4 +91,3 @@ def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_no
 
 kalman_info_filter = _wrap(_kalman_info_filter, _info_argcheck)
 info_E_step = _wrap(_info_E_step, _info_argcheck)
-

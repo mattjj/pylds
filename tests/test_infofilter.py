@@ -4,7 +4,7 @@ from numpy.random import randn, randint
 
 from pylds.lds_messages_interface import kalman_filter, kalman_info_filter, \
     E_step, info_E_step
-from pylds.lds_info_messages import info_predict_test, info_rts_test
+from pylds.lds_info_messages import info_predict_test
 from pylds.states import LDSStates
 
 
@@ -181,82 +181,6 @@ def test_info_predict():
         yield check_info_predict, J, h, J11, J21, J22
 
 
-####################################
-#  testing info_rts_backward_step  #
-####################################
-
-
-def cy_info_rts(
-        J11,J21,J22,Jpred_tp1,Jfilt_t,Jsmooth_tp1,hpred_tp1,
-        hfilt_t,hsmooth_tp1):
-    mu_t = np.zeros_like(hpred_tp1)
-    sigma_t = np.zeros_like(J11)
-    Covxnx = np.zeros_like(J21)
-
-    info_rts_test(
-        J11,J21,J22,Jpred_tp1,Jfilt_t,Jsmooth_tp1,hpred_tp1,hfilt_t,hsmooth_tp1,
-        mu_t, sigma_t, Covxnx)
-
-    return mu_t, sigma_t, Covxnx
-
-
-def py_info_rts(
-        J11,J21,J22,Jpred_tp1,Jfilt_t,Jsmooth_tp1,hpred_tp1,
-        hfilt_t,hsmooth_tp1):
-    n = J11.shape[0]
-    Jtp1_future = Jsmooth_tp1 - Jpred_tp1
-    htp1_future = hsmooth_tp1 - hpred_tp1
-    bigJ = blockarray([[J11, J21.T], [J21, J22]]) + blockdiag([Jfilt_t, Jtp1_future])
-    bigh = np.concatenate([hfilt_t, htp1_future])
-    mu, Sigma = info_to_mean(bigJ, bigh)
-    return mu[:n], Sigma[:n,:n], Sigma[:n,n:]
-
-
-def check_info_rts_step(potentials, (mu, Sigma, Cov_xnx)):
-    py_mu, py_sigma, py_Covxnx = py_info_rts(*potentials)
-    cy_mu, cy_sigma, cy_Covxnx = cy_info_rts(*potentials)
-
-    assert np.allclose(mu,py_mu)
-    assert np.allclose(Sigma,py_sigma)
-    assert np.allclose(Cov_xnx,py_Covxnx)
-
-    assert np.allclose(py_mu,cy_mu)
-    assert np.allclose(py_sigma,cy_sigma)
-    assert np.allclose(py_Covxnx,cy_Covxnx)
-
-
-def test_info_rts_step():
-    def generate_potentials(n):
-        bigJ = rand_psd(2*n,2*n)
-        J11, J21, J22 = map(np.copy,[bigJ[:n,:n], bigJ[n:,:n], bigJ[n:,n:]])
-
-        Jnode1, Jnode2 = rand_psd(n), rand_psd(n)
-        hnode1, hnode2 = randn(n), randn(n)
-
-        Jfilt_t = Jnode1
-        hfilt_t = hnode1
-
-        Jtemp = bigJ + blockdiag([Jnode1, np.zeros((n,n))])
-        htemp = np.concatenate([hnode1, np.zeros(n)])
-        mu, Sigma = info_to_mean(Jtemp, htemp)
-        Jpred_tp1, hpred_tp1 = mean_to_info(mu[n:], Sigma[n:,n:])
-
-        Jtemp = bigJ + blockdiag([Jnode1, Jnode2])
-        htemp = np.concatenate([hnode1, hnode2])
-        mu, Sigma = info_to_mean(Jtemp, htemp)
-        Jsmooth_tp1, hsmooth_tp1 = mean_to_info(mu[n:], Sigma[n:,n:])
-
-        potentials = J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, \
-            hfilt_t, hsmooth_tp1
-        answers = mu[:n], Sigma[:n,:n], Sigma[:n,n:]
-
-        return potentials, answers
-
-    for _ in xrange(5):
-        n = randint(1,5)
-        potentials, answers = generate_potentials(n)
-        yield check_info_rts_step, potentials, answers
-
 
 ####################################
 #  test against distribution form  #
@@ -300,20 +224,13 @@ def test_info_filter():
 
 
 def check_info_Estep(A, B, C, D, mu_init, sigma_init, data):
-    def Covxxn_to_ExnxT(Covxxn, smoothed_mus):
-        outs = np.empty_like(Covxxn)
-        for out, cov, mu_t, mu_tp1 in zip(outs,Covxxn, smoothed_mus[:-1], smoothed_mus[1:]):
-            out[...] = cov.T + np.outer(mu_tp1,mu_t)
-        return outs
-
     ll, smoothed_mus, smoothed_sigmas, ExnxT = E_step(
         mu_init, sigma_init, A, B.dot(B.T), C, D.dot(D.T), data)
-    partial_ll, smoothed_mus2, smoothed_sigmas2, Covxxn = info_E_step(
+    partial_ll, smoothed_mus2, smoothed_sigmas2, ExnxT2 = info_E_step(
         *info_params(A, B, C, D, mu_init, sigma_init, data))
 
     ll2 = partial_ll + LDSStates._extra_loglike_terms(
         A, B.dot(B.T), C, D.dot(D.T), mu_init, sigma_init, data)
-    ExnxT2 = Covxxn_to_ExnxT(Covxxn,smoothed_mus2)
 
     assert np.isclose(ll,ll2)
     assert np.allclose(smoothed_mus, smoothed_mus2)
