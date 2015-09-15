@@ -29,7 +29,7 @@ class LDSStates(object):
                 else:
                     self.stateseq = np.random.normal(size=(self.T,self.n))
 
-    # basics
+    ### basics
 
     def log_likelihood(self):
         if self._normalizer is None:
@@ -39,7 +39,7 @@ class LDSStates(object):
                 self.data)
         return self._normalizer
 
-    # generation
+    ### generation
 
     def generate_states(self):
         T, n = self.T, self.n
@@ -61,7 +61,8 @@ class LDSStates(object):
             self.sigma_obs, self.data)
 
         init_mu = self.A.dot(filtered_mus[-1])
-        init_sigma = self.sigma_states + self.A.dot(filtered_sigmas[-1]).dot(self.A.T)
+        init_sigma = self.sigma_states + self.A.dot(
+            filtered_sigmas[-1]).dot(self.A.T)
         randseq = np.einsum(
             'tjn,ij->tin',
             np.random.randn(Tpred-1, self.n, Npred),
@@ -80,15 +81,16 @@ class LDSStates(object):
 
         return obs
 
-    # filtering
+    ### filtering
 
     def filter(self):
-        self._normalizer, self.filtered_mus, self.filtered_sigmas = kalman_filter(
-            self.mu_init, self.sigma_init,
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.data)
+        self._normalizer, self.filtered_mus, self.filtered_sigmas = \
+            kalman_filter(
+                self.mu_init, self.sigma_init,
+                self.A, self.sigma_states, self.C, self.sigma_obs,
+                self.data)
 
-    # resampling
+    ### resampling
 
     def resample(self):
         self._normalizer, self.stateseq = filter_and_sample(
@@ -96,7 +98,7 @@ class LDSStates(object):
             self.A, self.sigma_states, self.C, self.sigma_obs,
             self.data)
 
-    # EM
+    ### EM
 
     def E_step(self):
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
@@ -104,30 +106,6 @@ class LDSStates(object):
                 self.mu_init, self.sigma_init,
                 self.A, self.sigma_states, self.C, self.sigma_obs,
                 self.data)
-
-        self._set_expected_stats(
-            self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
-
-    def info_E_step(self):
-        data = self.data
-        A, sigma_states, C, sigma_obs = \
-            self.A, self.sigma_states, self.C, self.sigma_obs
-
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-        J_pair_22 = A.T.dot(np.linalg.solve(sigma_states, A))
-        J_pair_21 = -np.linalg.solve(sigma_states, A)
-        J_pair_11 = np.linalg.inv(sigma_states)
-        J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
-        h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
-
-        self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-            E_xtp1_xtT = info_E_step(
-                J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
-
-        self._normalizer += self._extra_loglike_terms(
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.data)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
@@ -161,6 +139,32 @@ class LDSStates(object):
         self.E_dynamics_stats = \
             np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1])
 
+    # next two methods are for testing
+
+    def info_E_step(self):
+        data = self.data
+        A, sigma_states, C, sigma_obs = \
+            self.A, self.sigma_states, self.C, self.sigma_obs
+
+        J_init = np.linalg.inv(self.sigma_init)
+        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+        J_pair_22 = A.T.dot(np.linalg.solve(sigma_states, A))
+        J_pair_21 = -np.linalg.solve(sigma_states, A)
+        J_pair_11 = np.linalg.inv(sigma_states)
+        J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
+        h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
+
+        self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
+            E_xtp1_xtT = info_E_step(
+                J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
+
+        self._normalizer += self._extra_loglike_terms(
+            self.A, self.sigma_states, self.C, self.sigma_obs,
+            self.mu_init, self.sigma_init, self.data)
+
+        self._set_expected_stats(
+            self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
+
     @staticmethod
     def _extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
         p, n = C.shape
@@ -180,14 +184,15 @@ class LDSStates(object):
 
         return out
 
-    # mean field
+    ### mean field
 
     def meanfieldupdate(self):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             self.dynamics_distn._mf_expected_statistics()
-        J_yy, J_yx, J_node, logdet_node = self.emission_distn._mf_expected_statistics()
+        J_yy, J_yx, J_node, logdet_node = \
+            self.emission_distn._mf_expected_statistics()
         h_node = np.einsum('ti,ij->tj',self.data,J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \

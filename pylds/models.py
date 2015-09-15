@@ -172,8 +172,8 @@ class _LDSMeanField(_LDSBase,ModelMeanField):
         for s in self.states_list:
             s.meanfieldupdate()
 
-    def meanfield_udpate_parameters(self):
-        self.meanfield_udpate_dynamics_distn()
+    def meanfield_update_parameters(self):
+        self.meanfield_update_dynamics_distn()
         self.meanfield_update_emission_distn()
 
     def meanfield_update_dynamics_distn(self):
@@ -242,7 +242,7 @@ class _NonstationaryLDSEM(_LDSEM):
 #  model classes  #
 ###################
 
-class LDS(_LDSGibbsSampling,_LDSEM,_LDSBase):
+class LDS(_LDSGibbsSampling, _LDSMeanField, _LDSEM, _LDSBase):
     pass
 
 
