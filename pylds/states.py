@@ -7,6 +7,25 @@ from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
     info_E_step
 
 
+def extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
+    p, n = C.shape
+    T = data.shape[0]
+    out = 0.
+
+    out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
+    out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
+    out -= n/2. * np.log(2*np.pi)
+
+    out -= (T-1)/2. * np.linalg.slogdet(BBT)[1]
+    out -= (T-1)*n/2. * np.log(2*np.pi)
+
+    out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
+    out -= T/2. * np.linalg.slogdet(DDT)[1]
+    out -= T*p/2 * np.log(2*np.pi)
+
+    return out
+
+
 class LDSStates(object):
     def __init__(self,model,T=None,data=None,stateseq=None,
             generate=True,initialize_from_prior=False,initialize_to_noise=True):
@@ -150,6 +169,10 @@ class LDSStates(object):
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
                 J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
+
+        self._normalizer += extra_loglike_terms(
+            self.A, self.sigma_states, self.C, self.sigma_obs,
+            self.mu_init, self.sigma_init, self.data)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
