@@ -266,7 +266,7 @@ def check_filters(A, B, C, D, mu_init, sigma_init, data):
     def info_normalizer(J,h):
         out = 0.
         out += 1/2. * h.dot(np.linalg.solve(J,h))
-        out -= 1/2. * np.linalg.slogdet(J)[1] 
+        out -= 1/2. * np.linalg.slogdet(J)[1]
         out += h.shape[0]/2. * np.log(2*np.pi)
         return out
 
