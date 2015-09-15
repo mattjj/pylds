@@ -55,7 +55,7 @@ class LDSStates(object):
 
         return stateseq
 
-    def sample_predictions(self, Tpred, Npred, obs_noise=True):
+    def sample_predictions(self, Tpred, obs_noise=True):
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init, self.A, self.sigma_states, self.C,
             self.sigma_obs, self.data)
@@ -63,20 +63,20 @@ class LDSStates(object):
         init_mu = self.A.dot(filtered_mus[-1])
         init_sigma = self.sigma_states + self.A.dot(
             filtered_sigmas[-1]).dot(self.A.T)
+
         randseq = np.einsum(
-            'tjn,ij->tin',
-            np.random.randn(Tpred-1, self.n, Npred),
+            'tj,ij->ti', np.random.randn(Tpred-1, self.n),
             np.linalg.cholesky(self.sigma_states))
-        states = np.empty((Tpred, self.n, Npred))
-        states[0] = np.random.multivariate_normal(init_mu, init_sigma, size=Npred).T
+        states = np.empty((Tpred, self.n))
+
+        states[0] = np.random.multivariate_normal(init_mu, init_sigma)
         for t in xrange(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + randseq[t-1]
 
-        obs = np.einsum('ij,tjn->tin', self.C, states)
+        obs = np.einsum('ij,tj->ti', self.C, states)
         if obs_noise:
             obs += np.einsum(
-                'tjn,ij->tin',
-                np.random.randn(Tpred, self.p, Npred),
+                'tj,ij->ti', np.random.randn(Tpred, self.p),
                 np.linalg.cholesky(self.sigma_obs))
 
         return obs
@@ -131,6 +131,7 @@ class LDSStates(object):
 
         def is_symmetric(A):
             return np.allclose(A,A.T)
+
         assert is_symmetric(ExxT)
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)

@@ -281,4 +281,3 @@ def info_rts_test(
         J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
         hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
         temp_n, temp_nn, temp_nn2)
-

@@ -25,6 +25,7 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 # TODO try an Eigen version! faster for small matrices (numerically and in
 # function call overhead)
 # TODO cholesky update/downdate versions (square root filter)
+# TODO handle control inputs
 
 
 ##################################
@@ -667,4 +668,3 @@ def test_solve_diagonal_plus_lowrank(
     temp_pn = np.asfortranarray(np.random.randn(p,n))
     temp_nk = np.asfortranarray(np.random.randn(n,k))
     return solve_diagonal_plus_lowrank(a,B,C,b,C_is_identity,temp_nn,temp_pn,temp_nk)
-

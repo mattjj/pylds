@@ -54,10 +54,14 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    def sample_predictions(self,data,Tpred,Npred,obs_noise=True):
+    def predict(self, data, Tpred):
+        # return means and covariances
+        raise NotImplementedError
+
+    def sample_predictions(self,data,Tpred,obs_noise=True):
         self.add_data(data,generate=False)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred,Npred,obs_noise=obs_noise)
+        return s.sample_predictions(Tpred,obs_noise=obs_noise)
 
     # convenience properties
 

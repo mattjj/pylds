@@ -11,6 +11,7 @@ from pylds.models import LDS, DefaultLDS
 
 npr.seed(0)
 
+
 #########################
 #  set some parameters  #
 #########################
@@ -24,8 +25,7 @@ sigma_states = 0.01*np.eye(2)
 
 C = np.array([[10.,0.]])
 sigma_obs = 0.01*np.eye(1)
-# C = np.eye(2)
-# sigma_obs = 0.01*np.eye(2)
+
 
 ###################
 #  generate data  #
@@ -37,17 +37,39 @@ truemodel = LDS(
 
 data, stateseq = truemodel.generate(2000)
 
+
 ###############
 #  fit model  #
 ###############
 
-model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
-
-likes = []
-for _ in progprint_xrange(50):
+def update(model):
     model.EM_step()
-    likes.append(model.log_likelihood())
+    return model.log_likelihood()
 
+
+model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
+likes = [update(model) for _ in progprint_xrange(50)]
+
+plt.figure(figsize=(3,4))
 plt.plot(likes)
-plt.show()
+plt.xlabel('iteration')
+plt.ylabel('training likelihood')
 
+
+################
+#  predicting  #
+################
+
+Npredict = 100
+prediction_seed = data[:1700]
+
+predictions = model.sample_predictions(
+    prediction_seed, Npredict, obs_noise=False)
+
+plt.figure()
+plt.plot(data, 'b-')
+plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'r--')
+plt.xlabel('time index')
+plt.ylabel('prediction')
+
+plt.show()
