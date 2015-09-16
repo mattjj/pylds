@@ -163,15 +163,12 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
 class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_coordinate_descent_step(self):
-        self._meanfield_update_sweep()
-        return self._vlb()
-
-    def _meanfield_update_sweep(self):
         for s in self.states_list:
             if not hasattr(s, 'E_emission_stats'):
                 s.meanfieldupdate()
         self.meanfield_update_parameters()
         self.meanfield_update_states()
+        return self._vlb()
 
     def meanfield_update_states(self):
         for s in self.states_list:
