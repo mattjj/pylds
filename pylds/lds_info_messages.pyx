@@ -83,7 +83,7 @@ def info_E_step(
     # allocate output
     cdef double[:,::1] smoothed_mus = np.empty((T,n))
     cdef double[:,:,::1] smoothed_sigmas = np.empty((T,n,n))
-    cdef double[:,:,::1] Cov_xxns = np.empty((T-1,n,n))  # 'n' for next
+    cdef double[:,:,::1] ExnxT = np.empty((T-1,n,n))  # 'n' for next
     cdef double lognorm = 0.
 
     # run filter forwards
@@ -113,10 +113,10 @@ def info_E_step(
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
             predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],  # filtered_Js[t] is mutated
             predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],  # filtered_hs[t] is mutated
-            smoothed_mus[t], smoothed_sigmas[t], Cov_xxns[t],
+            smoothed_mus[t], smoothed_mus[t+1], smoothed_sigmas[t], ExnxT[t],
             temp_n, temp_nn, temp_nn2)
 
-    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.asarray(Cov_xxns)
+    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.swapaxes(ExnxT, 1, 2)
 
 
 ###########################
@@ -208,7 +208,7 @@ cdef inline void info_rts_backward_step(
     double[:,:] J11, double[:,:] J21, double[:,:] J22,
     double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # Jfilt_t is mutated!
     double[:] hpred_tp1, double[:] hfilt_t, double[:] hsmooth_tp1,  # hfilt_t is mutated!
-    double[:] mu_t, double[:,:] sigma_t, double[:,:] Cov_xnx,
+    double[:] mu_t, double[:] mu_tp1, double[:,:] sigma_t, double[:,:] ExnxT,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
     ) nogil:
 
@@ -239,8 +239,9 @@ cdef inline void info_rts_backward_step(
 
     info_to_distn(Jfilt_t, hfilt_t, mu_t, sigma_t)
 
-    dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &Cov_xnx[0,0], &n)
-    dpotrs('L', &n, &n, &temp_nn[0,0], &n, &Cov_xnx[0,0], &n, &info)
+    dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &ExnxT[0,0], &n)
+    dpotrs('L', &n, &n, &temp_nn[0,0], &n, &ExnxT[0,0], &n, &info)
+    dger(&n, &n, &one, &mu_tp1[0], &inc, &mu_t[0], &inc, &ExnxT[0,0], &n)  # TODO not right?
 
 
 cdef inline void info_to_distn(
@@ -268,16 +269,3 @@ def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
     temp_nn2 = np.random.randn(*J.shape)
 
     return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
-
-
-def info_rts_test(
-        J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1, hpred_tp1, hfilt_t,
-        hsmooth_tp1, mu_t, sigma_t, Cov_xnx):
-    temp_n = np.random.randn(*mu_t.shape)
-    temp_nn = np.random.randn(*sigma_t.shape)
-    temp_nn2 = np.random.randn(*sigma_t.shape)
-
-    info_rts_backward_step(
-        J11, J21, J22, Jpred_tp1, Jfilt_t, Jsmooth_tp1,
-        hpred_tp1, hfilt_t, hsmooth_tp1, mu_t, sigma_t, Cov_xnx,
-        temp_n, temp_nn, temp_nn2)

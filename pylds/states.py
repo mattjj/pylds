@@ -160,10 +160,8 @@ class LDSStates(object):
         h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-            covxxn = info_E_step(
+            E_xtp1_xtT = info_E_step(
                 J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
-        E_xtp1_xtT = self._cov_to_ExnxT(covxxn, self.smoothed_mus)
-
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
             self.mu_init, self.sigma_init, self.data)
@@ -190,10 +188,6 @@ class LDSStates(object):
 
         return out
 
-    def _cov_to_ExnxT(self, covxxn, mus):
-        return np.swapaxes(covxxn, 1, 2) \
-            + np.einsum('ti,tj->tij', mus[1:], mus[:-1])
-
     ### mean field
 
     def meanfieldupdate(self):
@@ -207,10 +201,8 @@ class LDSStates(object):
         h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-            covxxn = info_E_step(
+            E_xtp1_xtT = info_E_step(
                 J_init,h_init,J_pair_11,-J_pair_21,J_pair_22,J_node,h_node)
-        E_xtp1_xtT = self._cov_to_ExnxT(covxxn, self.smoothed_mus)
-
         self._normalizer += self._info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
 
