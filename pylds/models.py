@@ -2,7 +2,7 @@ from __future__ import division
 import numpy as np
 
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
-    ModelEM, ModelMeanField
+    ModelEM, ModelMeanField, ModelMeanFieldSVI
 
 from states import LDSStates
 
@@ -139,7 +139,7 @@ class _LDSBase(Model):
         return np.max(np.abs(np.linalg.eivals(self.dynamics_distn.A))) < 1.
 
 
-class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
+class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
     def resample_model(self):
         self.resample_parameters()
         self.resample_states()
@@ -161,14 +161,14 @@ class _LDSGibbsSampling(_LDSBase,ModelGibbsSampling):
             [np.hstack((s.stateseq,s.data)) for s in self.states_list])
 
 
-class _LDSMeanField(_LDSBase,ModelMeanField):
+class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_coordinate_descent_step(self):
         self._meanfield_update_sweep()
         return self._vlb()
 
     def _meanfield_update_sweep(self):
         for s in self.states_list:
-            if not hasattr(s,'E_emission_stats'):
+            if not hasattr(s, 'E_emission_stats'):
                 s.meanfieldupdate()
         self.meanfield_update_parameters()
         self.meanfield_update_states()
@@ -197,17 +197,48 @@ class _LDSMeanField(_LDSBase,ModelMeanField):
         return vlb
 
 
+class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):
+    def meanfield_sgdstep(self, minibatch, prob, stepsize, **kwargs):
+        states_list = self._get_mb_states_list(minibatch, **kwargs)
+        for s in states_list:
+            s.meanfieldupdate()
+        self._meanfield_sgdstep_parameters(states_list, prob, stepsize)
+
+    def _meanfield_sgdstep_parameters(self, states_list, prob, stepsize):
+        self._meanfield_sgdstep_dynamics_distn(states_list, prob, stepsize)
+        self._meanfield_sgdstep_emission_distn(states_list, prob, stepsize)
+
+    def _meanfield_sgdstep_dynamics_distn(self, states_list, prob, stepsize):
+        self.dynamics_distn.meanfield_sgdstep(
+            stats=(sum(s.E_dynamics_stats for s in states_list)),
+            prob=prob, stepsize=stepsize)
+
+    def _meanfield_sgdstep_emission_distn(self, states_list, prob, stepsize):
+        self.emission_distn.meanfield_sgdstep(
+            stats=(sum(s.E_emission_stats for s in states_list)),
+            prob=prob, stepsize=stepsize)
+
+    def _get_mb_states_list(self, minibatch, **kwargs):
+        minibatch = minibatch if isinstance(minibatch,list) else [minibatch]
+
+        def get_states(data):
+            self.add_states(data, generate=False, **kwargs)
+            return self.states_list.pop()
+
+        return [get_states(data) for data in minibatch]
+
+
 class _NonstationaryLDSGibbsSampling(_LDSGibbsSampling):
     def resample_model(self):
         self.resample_init_dynamics_distn()
-        super(_NonstationaryLDSGibbsSampling,self).resample_model()
+        super(_NonstationaryLDSGibbsSampling, self).resample_model()
 
     def resample_init_dynamics_distn(self):
         self.init_dynamics_distn.resample(
             [s.stateseq[0] for s in self.states_list])
 
 
-class _LDSEM(_LDSBase,ModelEM):
+class _LDSEM(_LDSBase, ModelEM):
     def EM_step(self):
         self.E_step()
         self.M_step()
@@ -234,7 +265,7 @@ class _LDSEM(_LDSBase,ModelEM):
 class _NonstationaryLDSEM(_LDSEM):
     def M_Step(self):
         self.M_step_init_dynamics_distn()
-        super(_NonstationaryLDSEM,self).M_step()
+        super(_NonstationaryLDSEM, self).M_step()
 
     def M_step_init_dynamics_distn(self):
         self.init_dynamics_distn.max_likelihood(
@@ -253,9 +284,9 @@ class NonstationaryLDS(
         _NonstationaryLDSGibbsSampling,
         _NonstationaryLDSEM,
         _LDSBase):
-    def __init__(self,init_dynamics_distn,*args,**kwargs):
+    def __init__(self, init_dynamics_distn, *args, **kwargs):
         self.init_dynamics_distn = init_dynamics_distn
-        super(NonstationaryLDS,self).__init__(*args,**kwargs)
+        super(NonstationaryLDS, self).__init__(*args, **kwargs)
 
     def resample_init_dynamics_distn(self):
         self.init_dynamics_distn.resample(
@@ -268,7 +299,7 @@ class NonstationaryLDS(
         return self.init_dynamics_distn.mu
 
     @mu_init.setter
-    def mu_init(self,mu_init):
+    def mu_init(self, mu_init):
         self.init_dynamics_distn.mu = mu_init
 
     @property
@@ -276,7 +307,7 @@ class NonstationaryLDS(
         return self.init_dynamics_distn.sigma
 
     @sigma_init.setter
-    def sigma_init(self,sigma_init):
+    def sigma_init(self, sigma_init):
         self.init_dynamics_distn.sigma = sigma_init
 
 
@@ -291,16 +322,16 @@ from pybasicbayes.distributions import Regression
 from autoregressive.distributions import AutoRegression
 
 
-def DefaultLDS(n,p):
+def DefaultLDS(n, p):
     model = LDS(
         dynamics_distn=AutoRegression(
-            nu_0=n+1,S_0=n*np.eye(n),M_0=np.zeros((n,n)),K_0=n*np.eye(n)),
+            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
         emission_distn=Regression(
-            nu_0=p+1,S_0=p*np.eye(p),M_0=np.zeros((p,n)),K_0=p*np.eye(n)))
+            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n)), K_0=p*np.eye(n)))
 
     model.A = 0.99*np.eye(n)
     model.sigma_states = np.eye(n)
-    model.C = np.random.randn(p,n)
+    model.C = np.random.randn(p, n)
     model.sigma_obs = 0.1*np.eye(p)
 
     return model
