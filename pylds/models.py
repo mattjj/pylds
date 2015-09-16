@@ -166,9 +166,11 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
         for s in self.states_list:
             if not hasattr(s, 'E_emission_stats'):
                 s.meanfieldupdate()
+
         self.meanfield_update_parameters()
         self.meanfield_update_states()
-        return self._vlb()
+
+        return self.vlb()
 
     def meanfield_update_states(self):
         for s in self.states_list:
@@ -186,7 +188,7 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
         self.emission_distn.meanfieldupdate(
             stats=(sum(s.E_emission_stats for s in self.states_list)))
 
-    def _vlb(self):
+    def vlb(self):
         vlb = 0.
         vlb += sum(s.get_vlb() for s in self.states_list)
         vlb += self.emission_distn.get_vlb()
