@@ -116,7 +116,8 @@ def info_E_step(
             smoothed_mus[t], smoothed_mus[t+1], smoothed_sigmas[t], ExnxT[t],
             temp_n, temp_nn, temp_nn2)
 
-    return lognorm, np.asarray(smoothed_mus), np.asarray(smoothed_sigmas), np.swapaxes(ExnxT, 1, 2)
+    return lognorm, np.asarray(smoothed_mus), \
+        np.asarray(smoothed_sigmas), np.swapaxes(ExnxT, 1, 2)
 
 
 ###########################
