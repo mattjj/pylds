@@ -2,6 +2,7 @@ from __future__ import division
 import numpy as np
 
 from pybasicbayes.util.general import AR_striding
+from pybasicbayes.util.stats import mniw_expectedstats
 
 from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
     info_E_step
@@ -138,9 +139,8 @@ class LDSStates(object):
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)
 
-        self.E_emission_stats = np.array([EyyT, EyxT, ExxT, self.T])
-        self.E_dynamics_stats = \
-            np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1])
+        self.E_emission_stats = (EyyT, EyxT, ExxT, self.T)
+        self.E_dynamics_stats = (E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1)
 
     # next two methods are for testing
 
@@ -194,10 +194,13 @@ class LDSStates(object):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
+        def get_params(distn):
+            return mniw_expectedstats(
+                *distn._natural_to_standard(distn.mf_natural_hypparam))
+
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
-            self.dynamics_distn._mf_expected_statistics()
-        J_yy, J_yx, J_node, logdet_node = \
-            self.emission_distn._mf_expected_statistics()
+            get_params(self.dynamics_distn)
+        J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
         h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
@@ -218,17 +221,20 @@ class LDSStates(object):
     def _info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, data):
         p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
+
         out = 0.
 
         out -= 1./2 * h_init.dot(np.linalg.solve(J_init, h_init))
         out += 1./2 * np.linalg.slogdet(J_init)[1]
         out -= n/2. * np.log(2*np.pi)
 
-        out += (T-1)/2. * logdet_pair
+        out += 1./2 * logdet_pair.sum() if isinstance(logdet_pair, np.ndarray) \
+            else (T-1)/2. * logdet_pair
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
         out -= 1./2 * np.einsum('ij,ti,tj->',J_yy,data,data)
-        out += T/2. * logdet_node
+        out += 1./2 * logdet_node if isinstance(logdet_node, np.ndarray) \
+            else T/2. * logdet_node
         out -= T*p/2. * np.log(2*np.pi)
 
         return out
