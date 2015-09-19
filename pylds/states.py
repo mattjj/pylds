@@ -67,20 +67,18 @@ class LDSStates(object):
 
         randseq = np.zeros((Tpred-1, self.n))
         if states_noise:
-            randseq += np.einsum(
-                'tj,ij->ti', np.random.randn(Tpred-1, self.n),
-                np.linalg.cholesky(self.sigma_states))
+            L = np.linalg.cholesky(self.sigma_states)
+            randseq += np.random.randn(Tpred-1, self.n).dot(L.T)
 
         states = np.empty((Tpred, self.n))
         states[0] = np.random.multivariate_normal(init_mu, init_sigma)
         for t in xrange(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + randseq[t-1]
 
-        obs = np.einsum('ij,tj->ti', self.C, states)
+        obs = states.dot(self.C.T)
         if obs_noise:
-            obs += np.einsum(
-                'tj,ij->ti', np.random.randn(Tpred, self.p),
-                np.linalg.cholesky(self.sigma_obs))
+            L = np.linalg.cholesky(self.sigma_obs)
+            obs += np.random.randn(Tpred, self.p).dot(L.T)
 
         return obs
 
@@ -118,10 +116,10 @@ class LDSStates(object):
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
 
-        EyyT = np.einsum('ti,tj->ij',self.data,self.data)
-        EyxT = np.einsum('ti,tj->ij',self.data,smoothed_mus)
-        ExxT = smoothed_sigmas.sum(0) + \
-            np.einsum('ti,tj->ij',smoothed_mus,smoothed_mus)
+        data = self.data
+        EyyT = data.T.dot(data)
+        EyxT = data.T.dot(smoothed_mus)
+        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
 
         E_xt_xtT = \
             ExxT - (smoothed_sigmas[-1]
@@ -232,7 +230,8 @@ class LDSStates(object):
             else (T-1)/2. * logdet_pair
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
-        out -= 1./2 * np.einsum('ij,ti,tj->',J_yy,data,data)
+        contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
+        out -= 1./2 * np.einsum(contract, J_yy, data, data)
         out += 1./2 * logdet_node if isinstance(logdet_node, np.ndarray) \
             else T/2. * logdet_node
         out -= T*p/2. * np.log(2*np.pi)
