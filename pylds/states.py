@@ -232,7 +232,7 @@ class LDSStates(object):
 
         contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
         out -= 1./2 * np.einsum(contract, J_yy, data, data)
-        out += 1./2 * logdet_node if isinstance(logdet_node, np.ndarray) \
+        out += 1./2 * logdet_node.sum() if isinstance(logdet_node, np.ndarray) \
             else T/2. * logdet_node
         out -= T*p/2. * np.log(2*np.pi)
 
