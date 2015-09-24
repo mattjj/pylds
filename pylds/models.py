@@ -91,8 +91,8 @@ class _LDSBase(Model):
             return self._sigma_init
 
         try:
-            import pydare
-            return pydare.dlyap(self.A, self.sigma_states)
+            from scipy.linalg import solve_discrete_lyapunov as dtlyap
+            return dtlyap(self.A, self.sigma_states)
         except ImportError:
             return np.linalg.solve(
                 np.eye(self.n**2) - np.kron(self.A,self.A), self.sigma_states.ravel())\
