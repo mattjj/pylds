@@ -55,7 +55,7 @@ def kalman_info_filter(
     info_condition_on(
         J_predict, h_predict, J_node[T-1], h_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
-    lognorm += info_lognorm_copy(
+    lognorm += info_lognorm(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
 
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
@@ -100,7 +100,7 @@ def info_E_step(
     info_condition_on(
         predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
-    lognorm += info_lognorm_copy(
+    lognorm += info_lognorm(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
 
     # run info-form rts update backwards
@@ -160,7 +160,7 @@ cdef inline double info_predict(
     dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
 
-    lognorm += info_lognorm(temp_nn, temp_n)  # mutates temp_n and temp_nn
+    lognorm += info_lognorm_destructive(temp_nn, temp_n)  # mutates temp_n and temp_nn
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
     # NOTE: transpose because J21 is in C-major order
     dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
@@ -173,7 +173,7 @@ cdef inline double info_predict(
     return lognorm
 
 
-cdef inline double info_lognorm(double[:,:] J, double[:] h) nogil:
+cdef inline double info_lognorm_destructive(double[:,:] J, double[:] h) nogil:
     # NOTE: mutates input to chol(J) and solve_triangular(chol(J),h), resp.
 
     cdef int n = J.shape[0]
@@ -192,7 +192,7 @@ cdef inline double info_lognorm(double[:,:] J, double[:] h) nogil:
     return lognorm
 
 
-cdef inline double info_lognorm_copy(
+cdef inline double info_lognorm(
     double[:,:] J, double[:] h,
     double[:] temp_n, double[:,:] temp_nn,
     ) nogil:
@@ -202,7 +202,7 @@ cdef inline double info_lognorm_copy(
     dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
 
-    return info_lognorm(temp_nn, temp_n)
+    return info_lognorm_destructive(temp_nn, temp_n)
 
 
 cdef inline void info_rts_backward_step(
