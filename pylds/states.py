@@ -137,8 +137,8 @@ class LDSStates(object):
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)
 
-        self.E_emission_stats = (EyyT, EyxT, ExxT, self.T)
-        self.E_dynamics_stats = (E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1)
+        self.E_emission_stats = np.array([EyyT, EyxT, ExxT, self.T])
+        self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1])
 
     # next two methods are for testing
 
