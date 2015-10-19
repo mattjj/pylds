@@ -10,9 +10,10 @@ cimport cython
 from libc.math cimport log, sqrt
 from numpy.math cimport INFINITY, PI
 
-from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
-        dgemv, dpotrs, daxpy, dtrtrs, dsyrk, dtrmv, \
-        dger, dnrm2, dpotri, copy_transpose, copy_upper_lower, ddot
+from scipy.linalg.cython_blas cimport dsymm, dcopy, dgemm, dgemv, daxpy, dsyrk, \
+    dtrmv, dger, dnrm2, ddot
+from scipy.linalg.cython_lapack cimport dpotrf, dpotrs, dpotri, dtrtrs
+from util cimport copy_transpose, copy_upper_lower
 
 # NOTE: because the matrix operations are done in Fortran order but the code
 # expects C ordered arrays as input, the BLAS and LAPACK function calls mark
