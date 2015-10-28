@@ -4,8 +4,6 @@ from scipy.stats import multivariate_normal
 
 from pylds.models import DefaultLDS
 
-np.random.seed(0)
-
 
 ##########
 #  util  #
@@ -168,4 +166,3 @@ def test_pairwise_secondmoments():
 def test_loglike():
     for _ in range(5):
         yield check_random_model, same_loglike
-

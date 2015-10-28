@@ -7,14 +7,14 @@ setup(
     version='0.0.1',
     description=
     "Learning and inference for Gaussian linear dynamical systems"
-    " with fast Cython and BLAS/LAPACK implementations",
+    "with fast Cython and BLAS/LAPACK implementations",
     author='Matthew James Johnson',
     author_email='mattjj@csail.mit.edu',
     license="MIT",
     url='https://github.com/mattjj/pylds',
     packages=['pylds'],
     install_requires=[
-        'Cython >= 0.20.1', 'numpy', 'scipy', 'matplotlib',
+        'Cython >= 0.20.1', 'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib',
         'pybasicbayes'],
     ext_modules=cythonize('pylds/**/*.pyx'),
     include_dirs=[np.get_include(),],
