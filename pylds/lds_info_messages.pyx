@@ -244,7 +244,7 @@ cdef inline void info_rts_backward_step(
 
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &ExnxT[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &ExnxT[0,0], &n, &info)
-    dger(&n, &n, &one, &mu_tp1[0], &inc, &mu_t[0], &inc, &ExnxT[0,0], &n)  # TODO not right?
+    dger(&n, &n, &one, &mu_tp1[0], &inc, &mu_t[0], &inc, &ExnxT[0,0], &n)
 
 
 cdef inline void info_to_distn(
