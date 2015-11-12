@@ -67,7 +67,6 @@ def info_E_step(
     double[:,::1] J_init, double[::1] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
     double[:,:,:] J_node, double[:,:] h_node):
-    # NOTE: uses two-filter strategy
 
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
@@ -120,6 +119,64 @@ def info_E_step(
 
     return lognorm, np.asarray(smoothed_mus), \
         np.asarray(smoothed_sigmas), np.swapaxes(ExnxT, 1, 2)
+
+
+def info_sample(
+    double[:,::1] J_init, double[::1] h_init,
+    double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
+    double[:,:,:] J_node, double[:,:] h_node):
+
+    cdef int T = J_node.shape[0], n = J_node.shape[1]
+    cdef int t
+
+    cdef double[:,:,::1] filtered_Js = np.empty((T,n,n))
+    cdef double[:,::1] filtered_hs = np.empty((T,n))
+    cdef double[:,:,::1] predict_Js = np.empty((T,n,n))
+    cdef double[:,::1] predict_hs = np.empty((T,n))
+
+    cdef double[::1]   temp_n   = np.empty((n,), order='F')
+    cdef double[::1,:] temp_nn  = np.empty((n,n),order='F')
+    cdef double[::1,:] temp_nn2 = np.empty((n,n),order='F')
+
+    # allocate output
+    cdef double[:,::1] randseq = np.random.randn(T,n)
+    cdef double lognorm = 0.
+
+    # dgemv requires these things
+    cdef int inc = 1
+    cdef double one = 1., zero = 0.
+
+    # run filter forwards
+    predict_Js[0,:,:] = J_init
+    predict_hs[0,:] = h_init
+    for t in range(T-1):
+        info_condition_on(
+            predict_Js[t], predict_hs[t], J_node[t], h_node[t],
+            filtered_Js[t], filtered_hs[t])
+        lognorm += info_predict(
+            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            predict_Js[t+1], predict_hs[t+1],
+            temp_n, temp_nn, temp_nn2)
+    info_condition_on(
+        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1],
+        filtered_Js[T-1], filtered_hs[T-1])
+    lognorm += info_lognorm(
+        filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
+
+    # sample backward
+    info_sample_gaussian(filtered_Js[T-1], filtered_hs[T-1], randseq[T-1])
+    for t in range(T-2,-1,-1):
+        # temp_n = np.dot(J12, randseq[t+1])
+        # J_pair_21 is C-major, so it is actually J12 to blas!
+        dgemv('N', &n, &n, &one, &J_pair_21[t,0,0], &n, &randseq[t+1,0],
+              &inc, &zero, &temp_n[0], &inc)
+        info_condition_on(
+            filtered_Js[t], filtered_hs[t], J_pair_11[t], temp_n,
+            filtered_Js[t], filtered_hs[t])
+        info_sample_gaussian(filtered_Js[t], filtered_hs[t], randseq[t])
+
+    return lognorm, np.asarray(randseq)
+
 
 
 ###########################
@@ -260,6 +317,20 @@ cdef inline void info_to_distn(
     dpotri('L', &n, &Sigma[0,0], &n, &info)
     copy_upper_lower(n, &Sigma[0,0])  # NOTE: 'L' in Fortran order, but upper for C order
     dgemv('N', &n, &n, &one, &Sigma[0,0], &n, &h[0], &inc, &zero, &mu[0], &inc)
+
+
+cdef inline void info_sample_gaussian(
+    double[:,:] J, double[:] h,
+    double[:] randvec,
+    ) nogil:
+    cdef int n = h.shape[0]
+    cdef int inc = 1, info = 0
+    cdef double one = 1.
+
+    dpotrf('L', &n, &J[0,0], &n, &info)
+    dtrtrs('L', 'T', 'N', &n, &inc, &J[0,0], &n, &randvec[0], &n, &info)
+    dpotrs('L', &n, &inc, &J[0,0], &n, &h[0], &n, &info)
+    daxpy(&n, &one, &h[0], &inc, &randvec[0], &inc)
 
 
 ###################
