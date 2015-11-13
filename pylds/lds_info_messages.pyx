@@ -144,7 +144,7 @@ def info_sample(
 
     # dgemv requires these things
     cdef int inc = 1
-    cdef double one = 1., zero = 0.
+    cdef double neg1 = -1., zero = 0.
 
     # run filter forwards
     predict_Js[0,:,:] = J_init
@@ -166,9 +166,8 @@ def info_sample(
     # sample backward
     info_sample_gaussian(filtered_Js[T-1], filtered_hs[T-1], randseq[T-1])
     for t in range(T-2,-1,-1):
-        # temp_n = np.dot(J12, randseq[t+1])
         # J_pair_21 is C-major, so it is actually J12 to blas!
-        dgemv('N', &n, &n, &one, &J_pair_21[t,0,0], &n, &randseq[t+1,0],
+        dgemv('N', &n, &n, &neg1, &J_pair_21[t,0,0], &n, &randseq[t+1,0],
               &inc, &zero, &temp_n[0], &inc)
         info_condition_on(
             filtered_Js[t], filtered_hs[t], J_pair_11[t], temp_n,
@@ -176,7 +175,6 @@ def info_sample(
         info_sample_gaussian(filtered_Js[t], filtered_hs[t], randseq[t])
 
     return lognorm, np.asarray(randseq)
-
 
 
 ###########################

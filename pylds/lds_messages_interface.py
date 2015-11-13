@@ -77,7 +77,8 @@ filter_and_sample_randomwalk = _wrap(_filter_and_sample_randomwalk,_argcheck_ran
 
 from lds_info_messages import \
     kalman_info_filter as _kalman_info_filter, \
-    info_E_step as _info_E_step
+    info_E_step as _info_E_step, \
+    info_sample as _info_sample
 
 
 def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node):
@@ -91,3 +92,4 @@ def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_no
 
 kalman_info_filter = _wrap(_kalman_info_filter, _info_argcheck)
 info_E_step = _wrap(_info_E_step, _info_argcheck)
+info_sample = _wrap(_info_sample, _info_argcheck)
