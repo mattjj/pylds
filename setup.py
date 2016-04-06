@@ -65,7 +65,7 @@ setup(
     url='https://github.com/mattjj/pylds',
     packages=['pylds'],
     install_requires=[
-        'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib', 'pybasicbayes', 'autoregressive'],
+        'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib', 'pybasicbayes'],
     ext_modules=cythonize('pylds/**/*.pyx'),
     classifiers=[
         'Intended Audience :: Science/Research',

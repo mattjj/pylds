@@ -317,8 +317,7 @@ class NonstationaryLDS(
 # TODO make data-dependent default constructors
 # TODO make a constructor that takes A, B, C, D
 
-from pybasicbayes.distributions import Regression
-from autoregressive.distributions import AutoRegression
+from pybasicbayes.distributions import Regression, AutoRegression
 
 
 def DefaultLDS(n, p):

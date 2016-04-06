@@ -3,9 +3,8 @@ import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import Regression
+from pybasicbayes.distributions import Regression, AutoRegression
 from pybasicbayes.util.text import progprint_xrange
-from autoregressive.distributions import AutoRegression
 
 from pylds.models import LDS, DefaultLDS
 
