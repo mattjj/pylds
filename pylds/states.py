@@ -216,16 +216,12 @@ class LDSStates(object):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
-        # TODO: Make this support other regression distributions
-        # TODO: E.g. make expected stats a property of the distribution?
-        assert not self.diagonal_noise
-        def get_params(distn):
-            return mniw_expectedstats(
-                *distn._natural_to_standard(distn.mf_natural_hypparam))
-
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
-            get_params(self.dynamics_distn)
-        J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
+            self.dynamics_distn.meanfield_expectedstats()
+
+        J_yy, J_yx, J_node, logdet_node = \
+            self.emission_distn.meanfield_expectedstats()
+
         h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
