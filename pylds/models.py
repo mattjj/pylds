@@ -4,6 +4,8 @@ import numpy as np
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField, ModelMeanFieldSVI
 
+from pybasicbayes.distributions import DiagonalRegression
+
 from states import LDSStates
 
 # TODO make separate versions for stationary, nonstationary,
@@ -54,6 +56,11 @@ class _LDSBase(Model):
             # filling in missing data
             raise NotImplementedError
         return s.data
+
+    def smooth(self, data):
+        self.add_data(data, generate=False)
+        s = self.states_list.pop()
+        return s.smooth()
 
     def predict(self, data, Tpred):
         # return means and covariances
@@ -135,8 +142,20 @@ class _LDSBase(Model):
         self.emission_distn.sigma = sigma_obs
 
     @property
+    def diagonal_noise(self):
+        return isinstance(self.emission_distn, DiagonalRegression)
+
+    @property
+    def sigma_obs_flat(self):
+        return self.emission_distn.sigmasq_flat
+
+    @sigma_obs_flat.setter
+    def sigma_obs_flat(self, value):
+        self.emission_distn.sigmasq_flat = value
+
+    @property
     def is_stable(self):
-        return np.max(np.abs(np.linalg.eivals(self.dynamics_distn.A))) < 1.
+        return np.max(np.abs(np.linalg.eigvals(self.dynamics_distn.A))) < 1.
 
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):

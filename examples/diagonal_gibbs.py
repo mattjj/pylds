@@ -1,0 +1,90 @@
+from __future__ import division
+import numpy as np
+import numpy.random as npr
+import matplotlib.pyplot as plt
+
+from pybasicbayes.distributions import Regression, DiagonalRegression
+from pybasicbayes.util.text import progprint_xrange
+from autoregressive.distributions import AutoRegression
+
+from pylds.models import LDS, DefaultLDS
+
+npr.seed(0)
+
+
+#########################
+#  set some parameters  #
+#########################
+D_obs, D_latent = 1, 2
+mu_init = np.array([0.,1.])
+sigma_init = 0.01*np.eye(2)
+
+A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
+                   [np.sin(np.pi/24),  np.cos(np.pi/24)]])
+sigma_states = 0.01*np.eye(2)
+
+# C = np.array([[10.,0.]])
+C = np.random.randn(D_obs, D_latent)
+sigma_obs = 0.1*np.eye(D_obs)
+
+
+###################
+#  generate data  #
+###################
+
+truemodel = LDS(
+    dynamics_distn=AutoRegression(A=A,sigma=sigma_states),
+    emission_distn=DiagonalRegression(D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
+
+data, stateseq = truemodel.generate(2000)
+
+
+###############
+#  fit model  #
+###############
+
+def update(model):
+    model.resample_model()
+    return model.log_likelihood()
+
+model = LDS(
+    dynamics_distn=AutoRegression(
+            nu_0=D_latent+1,
+            S_0=D_latent*np.eye(D_latent),
+            M_0=np.zeros((D_latent, D_latent)),
+            K_0=D_latent*np.eye(D_latent)),
+    emission_distn=DiagonalRegression(D_obs, D_latent))
+
+model.add_data(data)
+
+lls = [update(model) for _ in progprint_xrange(100)]
+
+plt.figure(figsize=(3,4))
+plt.plot(lls)
+plt.xlabel('iteration')
+plt.ylabel('log likelihood')
+
+################
+#  smoothing   #
+################
+smoothed_obs = model.smooth(data)
+
+################
+#  predicting  #
+################
+
+Npredict = 100
+prediction_seed = data[:1900]
+
+predictions = model.sample_predictions(
+    prediction_seed, Npredict, obs_noise=False)
+
+plt.figure()
+plt.plot(data, 'b-')
+plt.plot(smoothed_obs, 'r-')
+plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'g--')
+plt.xlabel('time index')
+plt.ylabel('prediction')
+# plt.xlim(1800,2000)
+
+plt.show()
