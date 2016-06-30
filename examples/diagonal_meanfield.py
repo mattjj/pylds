@@ -54,7 +54,7 @@ model.add_data(data)
 def update(model):
     return model.meanfield_coordinate_descent_step()
 
-for _ in progprint_xrange(1):
+for _ in progprint_xrange(100):
     model.resample_model()
 
 vlbs = [update(model) for _ in progprint_xrange(100)]
@@ -68,8 +68,9 @@ plt.ylabel('variational lower bound')
 ################
 #  smoothing   #
 ################
-model.emission_distn.resample_from_mf()
-smoothed_obs = model.smooth(data)
+# model.emission_distn.resample_from_mf()
+E_C,_,_,_ = model.emission_distn.mf_expectations
+smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T)
 
 ################
 #  predicting  #

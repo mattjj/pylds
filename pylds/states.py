@@ -227,6 +227,7 @@ class LDSStates(object):
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
                 J_init,h_init,J_pair_11,-J_pair_21,J_pair_22,J_node,h_node)
+
         self._normalizer += self._info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
 
