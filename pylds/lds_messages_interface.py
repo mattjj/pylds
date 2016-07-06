@@ -27,13 +27,14 @@ def _ensure_ndim(X,T,ndim):
         return as_strided(X, shape=(T,)+X.shape, strides=(0,)+X.strides)
 
 
-def _argcheck(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
+def _argcheck(mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data):
     T = data.shape[0]
-    A, sigma_states, C, sigma_obs = \
+    A, B, sigma_states, C, D, sigma_obs = \
         map(partial(_ensure_ndim, T=T, ndim=3),
-            [A, sigma_states, C, sigma_obs])
+            [A, B, sigma_states, C, D, sigma_obs])
+    inputs = np.require(inputs, dtype=np.float64, requirements='C')
     data = np.require(data, dtype=np.float64, requirements='C')
-    return mu_init, sigma_init, A, sigma_states, C, sigma_obs, data
+    return mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data
 
 
 def _argcheck_diag_sigma_obs(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
