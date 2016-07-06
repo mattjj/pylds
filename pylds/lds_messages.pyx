@@ -37,7 +37,7 @@ def kalman_filter(
     double[:] mu_init, double[:,:] sigma_init,
     double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
     double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
-    double[:,::1] inputs, double[:,::1] data):
+    double[:,:] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -75,9 +75,9 @@ def kalman_filter(
 
 def rts_smoother(
     double[::1] mu_init, double[:,::1] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
+    double[:,:] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -103,11 +103,13 @@ def rts_smoother(
     for t in range(T):
         ll += condition_on(
             mu_predicts[t], sigma_predicts[t],
-            C[t], sigma_obs[t], data[t],
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             smoothed_mus[t], smoothed_sigmas[t],
             temp_p, temp_pn, temp_pp)
         predict(
-            smoothed_mus[t], smoothed_sigmas[t], A[t], sigma_states[t],
+            smoothed_mus[t], smoothed_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predicts[t+1], sigma_predicts[t+1],
             temp_nn)
 
@@ -127,7 +129,7 @@ def filter_and_sample(
     double[:] mu_init, double[:,:] sigma_init,
     double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
     double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
-    double[:,::1] inputs, double[:,::1] data):
+    double[:,:] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -179,9 +181,9 @@ def filter_and_sample(
 
 def E_step(
     double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
+    double[:,:] inputs, double[:,::1] data):
 
     # NOTE: this is almost the same as the RTS smoother except
     #   1. we collect statistics along the way, and
@@ -211,11 +213,14 @@ def E_step(
     sigma_predicts[0] = sigma_init
     for t in range(T):
         ll += condition_on(
-            mu_predicts[t], sigma_predicts[t], C[t], sigma_obs[t], data[t],
+            mu_predicts[t], sigma_predicts[t],
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             smoothed_mus[t], smoothed_sigmas[t],
             temp_p, temp_pn, temp_pp)
         predict(
-            smoothed_mus[t], smoothed_sigmas[t], A[t], sigma_states[t],
+            smoothed_mus[t], smoothed_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predicts[t+1], sigma_predicts[t+1],
             temp_nn)
 
@@ -238,9 +243,9 @@ def E_step(
 
 def kalman_filter_diagonal(
     double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:] sigma_obs,
+    double[:,:] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -265,11 +270,14 @@ def kalman_filter_diagonal(
     # run filter forwards
     for t in range(T):
         ll += condition_on_diagonal(
-            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            mu_predict, sigma_predict,
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
         predict(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            filtered_mus[t], filtered_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predict, sigma_predict,
             temp_nn)
 
@@ -278,9 +286,9 @@ def kalman_filter_diagonal(
 
 def filter_and_sample_diagonal(
     double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:] sigma_obs,
+    double[:,:] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -308,11 +316,14 @@ def filter_and_sample_diagonal(
     # run filter forwards
     for t in range(T):
         ll += condition_on_diagonal(
-            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            mu_predict, sigma_predict,
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
         predict(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            filtered_mus[t], filtered_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predict, sigma_predict,
             temp_nn)
 
@@ -320,7 +331,9 @@ def filter_and_sample_diagonal(
     sample_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
     for t in range(T-2,-1,-1):
         condition_on(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t], randseq[t+1],
+            filtered_mus[t], filtered_sigmas[t],
+            A[t], B[t], sigma_states[t],
+            inputs[t], randseq[t+1],
             filtered_mus[t], filtered_sigmas[t],
             temp_n, temp_nn, sigma_predict)
         sample_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
@@ -333,6 +346,7 @@ def filter_and_sample_diagonal(
 def filter_and_sample_randomwalk(
     double[::1] mu_init, double[::1] sigmasq_init, double[:,:] sigmasq_states,
     double[:,:] sigmasq_obs, double[:,::1] data):
+    # TODO: Update!
 
     # allocate temporaries and internals
     cdef int T = data.shape[0], n = data.shape[1]
@@ -413,8 +427,8 @@ cdef inline double condition_on(
         # temp_p -= - C * mu_x = y - C * mu_x
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         # temp_p -= - D * u = y - C * mu_x - D * u
-        dgemv('T', &d, &p, &neg1, &D[0,0], &d, &u[0], &inc, &one, &temp_p[0], &inc)
-
+        if d > 0:
+            dgemv('T', &d, &p, &neg1, &D[0,0], &d, &u[0], &inc, &one, &temp_p[0], &inc)
         # Solve temp_p = temp_pp^{-1} temp_p
         #              = L^{-1} (y - C * mu_x)
         dtrtrs('L', 'N', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
@@ -475,7 +489,8 @@ cdef inline void predict(
     # mu_predict = A * mu
     dgemv('T', &n, &n, &one, &A[0,0], &n, &mu[0], &inc, &zero, &mu_predict[0], &inc)
     # mu_predict += B * u
-    dgemv('T', &d, &n, &one, &B[0,0], &d, &u[0], &inc, &one, &mu_predict[0], &inc)
+    if d > 0:
+        dgemv('T', &d, &n, &one, &B[0,0], &d, &u[0], &inc, &one, &mu_predict[0], &inc)
 
     # temp_nn = A * sigma
     dgemm('T', 'N', &n, &n, &n, &one, &A[0,0], &n, &sigma[0,0], &n, &zero, &temp_nn[0,0], &n)
@@ -577,7 +592,8 @@ cdef inline double condition_on_diagonal(
         # Compute residual
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
-        dgemv('T', &d, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
+        if d > 0:
+            dgemv('T', &d, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
 
         # Compute conditional mean and variance using low rank plus diagonal code
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
@@ -655,6 +671,8 @@ cdef inline double condition_on_randomwalk(
     double *sigmasq_obs, double *y,
     double *mu_cond, double *sigmasq_cond,
     ) nogil:
+
+    # TODO: Update!
 
     cdef double ll = -n/2. * log(2.*PI), sigmasq_yi
     cdef int i

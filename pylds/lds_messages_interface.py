@@ -32,7 +32,10 @@ def _argcheck(mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, 
     A, B, sigma_states, C, D, sigma_obs = \
         map(partial(_ensure_ndim, T=T, ndim=3),
             [A, B, sigma_states, C, D, sigma_obs])
+    # Check that the inputs are C ordered and at least 1d
     inputs = np.require(inputs, dtype=np.float64, requirements='C')
+    # if inputs.shape[1] == 0:
+    #     inputs = np.zeros((T,1))
     data = np.require(data, dtype=np.float64, requirements='C')
     return mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data
 

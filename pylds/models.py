@@ -24,9 +24,9 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self,data,**kwargs):
+    def add_data(self, data, inputs=None, **kwargs):
         assert isinstance(data,np.ndarray)
-        self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
         return self
 
     def log_likelihood(self,data=None):
@@ -40,16 +40,18 @@ class _LDSBase(Model):
         else:
             return sum(s.log_likelihood() for s in self.states_list)
 
-    def generate(self,T,keep=True):
-        s = LDSStates(model=self,T=T,initialize_from_prior=True)
-        data = self._generate_obs(s)
+    def generate(self, T, inputs=None, keep=True):
+        s = LDSStates(model=self, T=T, inputs=inputs, initialize_from_prior=True)
+        data = self._generate_obs(s, inputs)
         if keep:
             self.states_list.append(s)
         return data, s.stateseq
 
-    def _generate_obs(self,s):
+    def _generate_obs(self,s, inputs):
         if s.data is None:
-            s.data = self.emission_distn.rvs(x=s.stateseq,return_xy=False)
+            inputs = np.zeros((s.T, 0)) if inputs is None else inputs
+            s.data = self.emission_distn.rvs(
+                x=np.hstack((s.stateseq, inputs)), return_xy=False)
         else:
             # filling in missing data
             raise NotImplementedError
@@ -109,7 +111,7 @@ class _LDSBase(Model):
 
     @property
     def A(self):
-        return self.dynamics_distn.A[:,:self.n]
+        return self.dynamics_distn.A[:,:self.n].copy("C")
 
     @A.setter
     def A(self,A):
@@ -117,7 +119,7 @@ class _LDSBase(Model):
 
     @property
     def B(self):
-        return self.dynamics_distn.A[:, self.n:]
+        return self.dynamics_distn.A[:, self.n:].copy("C")
 
     @B.setter
     def B(self, B):
@@ -133,7 +135,7 @@ class _LDSBase(Model):
 
     @property
     def C(self):
-        return self.emission_distn.A[:,:self.n]
+        return self.emission_distn.A[:,:self.n].copy("C")
 
     @C.setter
     def C(self,C):
@@ -141,7 +143,7 @@ class _LDSBase(Model):
 
     @property
     def D(self):
-        return self.emission_distn.A[:, self.n:]
+        return self.emission_distn.A[:, self.n:].copy("C")
 
     @D.setter
     def D(self, D):
