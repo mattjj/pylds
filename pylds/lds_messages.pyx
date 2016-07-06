@@ -427,7 +427,7 @@ cdef inline double condition_on(
 
         # Compute the conditional mean
         # mu_cond = mu_x + temp_pn * temp_p
-        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x - D * u)
+        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x)
         # Compare this to (18.31) of Murphy
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
