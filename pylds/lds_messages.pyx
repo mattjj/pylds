@@ -521,6 +521,7 @@ cdef inline void rts_backward_step(
     double[:] next_smoothed_mu, double[:,:] next_smoothed_sigma,
     double[:,:] temp_nn, double[:,:] temp_nn2,  # temps
     ) nogil:
+    # TODO: Update this function.
 
     # NOTE: on exit, temp_nn holds the RTS gain, called G_k' in the notation of
     # Thm 8.2 of Sarkka 2013 "Bayesian Filtering and Smoothing"

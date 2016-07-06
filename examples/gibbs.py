@@ -37,43 +37,48 @@ sigma_obs = 0.01*np.eye(1)
 ###################
 
 truemodel = LDS(
-    dynamics_distn=AutoRegression(A=np.hstack((A,B)), sigma=sigma_states),
+    dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
     emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
 
 inputs = np.random.randn(T,d)
 data, stateseq = truemodel.generate(T, inputs=inputs)
 
-
 ###############
-#  fit model  #
+# test models #
 ###############
-
-def update(model):
-    model.resample_model()
-    return model.log_likelihood()
-
-model = LDS(
+# Model without input
+noinput_model = LDS(
     dynamics_distn=Regression(nu_0=n + 2, S_0=n * np.eye(n),
                               M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
     emission_distn=Regression(nu_0=p+1, S_0=p*np.eye(p),
                               M_0=np.zeros((p, n)), K_0=n*np.eye(n)))
-model.add_data(data, inputs=None)
+noinput_model.add_data(data, inputs=None)
 
-affinemodel = LDS(
+# Make a model with inputs
+input_model = LDS(
     dynamics_distn=Regression(nu_0=n + 2, S_0=n * np.eye(n),
                               M_0=np.zeros((n, n+d)), K_0=(n+d) * np.eye(n+d)),
     emission_distn=Regression(nu_0=p+1, S_0=p*np.eye(p),
                               M_0=np.zeros((p, n+d)), K_0=(n+d)*np.eye(n+d)))
-affinemodel.add_data(data, inputs=inputs)
+input_model.add_data(data, inputs=inputs)
 
+###############
+#  fit models #
+###############
+N_samples = 100
+def update(model):
+    model.resample_model()
+    return model.log_likelihood()
 
-# model = DefaultLDS(n=2,p=data.shape[1]).add_data(data)
-lls = [update(model) for i in progprint_xrange(100)]
-affine_lls = [update(affinemodel) for i in progprint_xrange(100)]
+true_ll = truemodel.log_likelihood()
+noinput_lls = [update(noinput_model) for _ in progprint_xrange(N_samples)]
+input_lls = [update(input_model) for _ in progprint_xrange(N_samples)]
 
 plt.figure(figsize=(3,4))
-plt.plot(lls)
-plt.plot(affine_lls)
+plt.plot(noinput_lls, label="no input")
+plt.plot(input_lls, label="input")
+plt.plot([0, N_samples], [true_ll, true_ll], label="true")
+plt.legend(loc="lower right")
 plt.xlabel('iteration')
 plt.ylabel('log likelihood')
 
