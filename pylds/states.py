@@ -16,7 +16,7 @@ class LDSStates(object):
 
         self.T = T if T else data.shape[0]
         self.data = data
-        self.inputs = np.zeros((T,0)) if inputs is None else inputs
+        self.inputs = np.zeros((self.T,0)) if inputs is None else inputs
 
         self._normalizer = None
 
