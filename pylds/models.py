@@ -29,14 +29,14 @@ class _LDSBase(Model):
         self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
         return self
 
-    def log_likelihood(self,data=None):
+    def log_likelihood(self,data=None, inputs=None):
         if data is not None:
             assert isinstance(data,(list,np.ndarray))
             if isinstance(data,np.ndarray):
-                self.add_data(data=data,generate=False)
+                self.add_data(data=data, inputs=inputs, generate=False)
                 return self.states_list.pop().log_likelihood()
             else:
-                return sum(self.log_likelihood(d) for d in data)
+                return sum(self.log_likelihood(d, i) for (d, i) in zip(data, inputs))
         else:
             return sum(s.log_likelihood() for s in self.states_list)
 

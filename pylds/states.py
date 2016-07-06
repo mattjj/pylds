@@ -37,8 +37,9 @@ class LDSStates(object):
         if self._normalizer is None:
             self._normalizer, _, _ = kalman_filter(
                 self.mu_init, self.sigma_init,
-                self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.data)
+                self.A, self.B, self.sigma_states,
+                self.C, self.D, self.sigma_obs,
+                self.inputs, self.data)
         return self._normalizer
 
     ### generation
