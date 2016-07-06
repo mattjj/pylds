@@ -69,12 +69,17 @@ class _LDSBase(Model):
     @property
     def n(self):
         'latent dimension'
-        return self.emission_distn.D_in
+        return self.dynamics_distn.D_out
 
     @property
     def p(self):
         'emission dimension'
         return self.emission_distn.D_out
+
+    @property
+    def d(self):
+        'input dimension'
+        return self.dynamics_distn.D_in - self.dynamics_distn.D_out
 
     @property
     def mu_init(self):
@@ -104,11 +109,19 @@ class _LDSBase(Model):
 
     @property
     def A(self):
-        return self.dynamics_distn.A
+        return self.dynamics_distn.A[:,:self.n]
 
     @A.setter
     def A(self,A):
-        self.dynamics_distn.A = A
+        self.dynamics_distn.A[:,:self.n] = A
+
+    @property
+    def B(self):
+        return self.dynamics_distn.A[:, self.n:]
+
+    @B.setter
+    def B(self, B):
+        self.dynamics_distn.A[:, self.n:] = B
 
     @property
     def sigma_states(self):
@@ -120,11 +133,19 @@ class _LDSBase(Model):
 
     @property
     def C(self):
-        return self.emission_distn.A
+        return self.emission_distn.A[:,:self.n]
 
     @C.setter
     def C(self,C):
-        self.emission_distn.A = C
+        self.emission_distn.A[:,:self.n] = C
+
+    @property
+    def D(self):
+        return self.emission_distn.A[:, self.n:]
+
+    @D.setter
+    def D(self, D):
+        self.emission_distn.A[:, self.n:] = D
 
     @property
     def sigma_obs(self):
@@ -154,11 +175,11 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
     def resample_dynamics_distn(self):
         self.dynamics_distn.resample(
-            [s.strided_stateseq for s in self.states_list])
+            [np.hstack((s.stateseq[:-1],s.inputs[:-1],s.stateseq[1:])) for s in self.states_list])
 
     def resample_emission_distn(self):
         self.emission_distn.resample(
-            [np.hstack((s.stateseq,s.data)) for s in self.states_list])
+            [np.hstack((s.stateseq,s.inputs,s.data)) for s in self.states_list])
 
 
 class _LDSMeanField(_LDSBase, ModelMeanField):
