@@ -33,9 +33,9 @@ from blas_lapack cimport dsymm, dcopy, dgemm, dpotrf, \
 
 def kalman_filter(
     double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
+    double[:,::1] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -57,11 +57,14 @@ def kalman_filter(
     # run filter forwards
     for t in range(T):
         ll += condition_on(
-            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            mu_predict, sigma_predict,
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_pn, temp_pp)
         predict(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            filtered_mus[t], filtered_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predict, sigma_predict,
             temp_nn)
 
@@ -97,7 +100,8 @@ def rts_smoother(
     sigma_predicts[0] = sigma_init
     for t in range(T):
         ll += condition_on(
-            mu_predicts[t], sigma_predicts[t], C[t], sigma_obs[t], data[t],
+            mu_predicts[t], sigma_predicts[t],
+            C[t], sigma_obs[t], data[t],
             smoothed_mus[t], smoothed_sigmas[t],
             temp_p, temp_pn, temp_pp)
         predict(
@@ -119,9 +123,9 @@ def rts_smoother(
 
 def filter_and_sample(
     double[:] mu_init, double[:,:] sigma_init,
-    double[:,:,:] A, double[:,:,:] sigma_states,
-    double[:,:,:] C, double[:,:,:] sigma_obs,
-    double[:,::1] data):
+    double[:,:,:] A, double[:,:,:] B, double[:,:,:] sigma_states,
+    double[:,:,:] C, double[:,:,:] D, double[:,:,:] sigma_obs,
+    double[:,::1] inputs, double[:,::1] data):
 
     # allocate temporaries and internals
     cdef int T = C.shape[0], p = C.shape[1], n = C.shape[2]
@@ -146,11 +150,14 @@ def filter_and_sample(
     # run filter forwards
     for t in range(T):
         ll += condition_on(
-            mu_predict, sigma_predict, C[t], sigma_obs[t], data[t],
+            mu_predict, sigma_predict,
+            C[t], D[t], sigma_obs[t],
+            inputs[t], data[t],
             filtered_mus[t], filtered_sigmas[t],
             temp_p, temp_pn, temp_pp)
         predict(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t],
+            filtered_mus[t], filtered_sigmas[t], inputs[t],
+            A[t], B[t], sigma_states[t],
             mu_predict, sigma_predict,
             temp_nn)
 
@@ -158,7 +165,9 @@ def filter_and_sample(
     sample_gaussian(filtered_mus[T-1], filtered_sigmas[T-1], randseq[T-1])
     for t in range(T-2,-1,-1):
         condition_on(
-            filtered_mus[t], filtered_sigmas[t], A[t], sigma_states[t], randseq[t+1],
+            filtered_mus[t], filtered_sigmas[t],
+            A[t], B[t], sigma_states[t],
+            inputs[t], randseq[t+1],
             filtered_mus[t], filtered_sigmas[t],
             temp_n, temp_nn, sigma_predict)
         sample_gaussian(filtered_mus[t], filtered_sigmas[t], randseq[t])
@@ -320,9 +329,12 @@ def E_step(
 ############################
 
 cdef inline double condition_on(
-    # inputs
+    # prior predictions
     double[:] mu_x, double[:,:] sigma_x,
-    double[:,:] C, double[:,:] sigma_obs, double[:] y,
+    # Observation model
+    double[:,:] C, double[:,:] D, double[:,:] sigma_obs,
+    # Data
+    double[:] u, double[:] y,
     # outputs
     double[:] mu_cond, double[:,:] sigma_cond,
     # temps
@@ -338,28 +350,62 @@ cdef inline double condition_on(
         dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
         return 0.
     else:
-        # NOTE: the C arguments are treated as transposed because C is
+        # NOTE: the C and D arguments are treated as transposed because C and D are
         # assumed to be in C order (row-major order)
+
+        # Compute temp_pn = C * sigma_x
+        # and     temp_pp = chol(sigma_obs + C * sigma_x * C.T) = chol(S)
+        #
+        # First, temp_pn = C * sigma_x
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
+        # Now temp_pp = sigma_obs
         dcopy(&pp, &sigma_obs[0,0], &inc, &temp_pp[0,0], &inc)
+        # temp_pp += temp_pn * C = sigma_obs + C * sigma_x * C.T
+        # call this S, as in (18.38) of Murphy
         dgemm('N', 'N', &p, &p, &n, &one, &temp_pn[0,0], &p, &C[0,0], &n, &one, &temp_pp[0,0], &p)
+        # temp_pp = cholesky(S, lower=True) = L
         dpotrf('L', &p, &temp_pp[0,0], &p, &info)
 
+        # Compute the residual -- this is where the inputs come in
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
+        # temp_p -= - C * mu_x = y - C * mu_x
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
+        # temp_p -= - D * u = y - C * mu_x - D * u
+        dgemv('T', &n, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
+
+        # Solve temp_p = temp_pp^{-1} temp_p
+        #              = L^{-1} (y - C * mu_x)
         dtrtrs('L', 'N', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
+        # log likelihood = -1/2 * ||L^{-1} (y - C * mu_x)||*2
         ll = (-1./2) * dnrm2(&p, &temp_p[0], &inc)**2
+        # Second solve with cholesky
+        # temp_p = L.T^{-1} temp_p
+        #        = S^{-1} (y - C * mu_x)
         dtrtrs('L', 'T', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
+
+        # Compute the conditional mean
+        # mu_cond = mu_x + temp_pn * temp_p
+        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x)
+        # Compare this to (18.31) of Murphy
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
         dgemv('T', &p, &n, &one, &temp_pn[0,0], &p, &temp_p[0], &inc, &one, &mu_cond[0], &inc)
 
+        # Compute the conditional covariance
+        # sigma_cond = sigma_x - C * sigma_x.T * L.T^{-1} * L^{-1} C.T * sigma_x
+        #            = sigma_x - sigma_x * C.T * S^{-1} * C * sigma_x
+        # Compare this to (18.32) of Murphy
+        #
+        # First, temp_pn = temp_pp^{-1} temp_pn
+        #                = L^{-1} C.T * sigma_x
+        # Then we square this and subtract from sigma_x
         dtrtrs('L', 'N', 'N', &p, &n, &temp_pp[0,0], &p, &temp_pn[0,0], &p, &info)
         if (&sigma_x[0,0] != &sigma_cond[0,0]):
             dcopy(&nn, &sigma_x[0,0], &inc, &sigma_cond[0,0], &inc)
         # TODO this call aliases pointers, should really call dsyrk and copy lower to upper
         dgemm('T', 'N', &n, &n, &p, &neg1, &temp_pn[0,0], &p, &temp_pn[0,0], &p, &one, &sigma_cond[0,0], &n)
 
+        # Compute log determinant of the covariance by summing log diagonal of cholesky
         ll -= p/2. * log(2.*PI)
         for i in range(p):
             ll -= log(temp_pp[i,i])
@@ -369,8 +415,8 @@ cdef inline double condition_on(
 
 cdef inline void predict(
     # inputs
-    double[:] mu, double[:,:] sigma,
-    double[:,:] A, double[:,:] sigma_states,
+    double[:] mu, double[:,:] sigma, double[:] u,
+    double[:,:] A, double[:,:] B, double[:,:] sigma_states,
     # outputs
     double[:] mu_predict, double[:,:] sigma_predict,
     # temps
@@ -381,13 +427,18 @@ cdef inline void predict(
     cdef int inc = 1
     cdef double one = 1., zero = 0.
 
-    # NOTE: the A arguments are treated as transposed because A is assumed to be
-    # in C order
+    # NOTE: the A and B arguments are treated as transposed because A and B are assumed to be
+    # in C order (row-major order)
 
+    # mu_predict = A * mu
     dgemv('T', &n, &n, &one, &A[0,0], &n, &mu[0], &inc, &zero, &mu_predict[0], &inc)
+    # mu_predict += B * u
+    dgemv('T', &n, &n, &one, &B[0,0], &n, &u[0], &inc, &one, &mu_predict[0], &inc)
 
+    # temp_nn = A * sigma
     dgemm('T', 'N', &n, &n, &n, &one, &A[0,0], &n, &sigma[0,0], &n, &zero, &temp_nn[0,0], &n)
     dcopy(&nn, &sigma_states[0,0], &inc, &sigma_predict[0,0], &inc)
+    # sigma_pred = sigma_states + A * sigma * A.T
     dgemm('N', 'N', &n, &n, &n, &one, &temp_nn[0,0], &n, &A[0,0], &n, &one, &sigma_predict[0,0], &n)
 
 
