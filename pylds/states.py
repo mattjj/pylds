@@ -9,13 +9,14 @@ from pylds.lds_messages_interface import kalman_filter, filter_and_sample, E_ste
 
 
 class LDSStates(object):
-    def __init__(self,model,T=None,data=None,stateseq=None,
+    def __init__(self,model,T=None,data=None,inputs=None,stateseq=None,
             generate=True,initialize_from_prior=False,initialize_to_noise=True):
         self.model = model
         self.data = data
 
         self.T = T if T else data.shape[0]
         self.data = data
+        self.inputs = np.zeros((T,0)) if inputs is None else inputs
 
         self._normalizer = None
 
@@ -52,11 +53,14 @@ class LDSStates(object):
         randseq = np.random.randn(T-1,n).dot(chol.T)
 
         for t in xrange(1,T):
-            stateseq[t] = self.A.dot(stateseq[t-1]) + randseq[t-1]
+            stateseq[t] = self.A.dot(stateseq[t-1]) + \
+                          self.B.dot(self.inputs[t-1]) + \
+                          randseq[t-1]
 
         return stateseq
 
     def sample_predictions(self, Tpred, states_noise, obs_noise):
+        # TODO Update
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init, self.A, self.sigma_states, self.C,
             self.sigma_obs, self.data)
@@ -121,6 +125,7 @@ class LDSStates(object):
     ### EM
 
     def E_step(self):
+        # TODO: Update
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = E_step(
                 self.mu_init, self.sigma_init,
@@ -131,6 +136,7 @@ class LDSStates(object):
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     def _set_expected_stats(self,smoothed_mus,smoothed_sigmas,E_xtp1_xtT):
+        # TODO: Update with x u^T
         assert not np.isnan(E_xtp1_xtT).any()
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
@@ -293,8 +299,16 @@ class LDSStates(object):
         return self.model.p
 
     @property
+    def d(self):
+        return self.model.d
+
+    @property
     def A(self):
         return self.model.A
+
+    @property
+    def B(self):
+        return self.model.B
 
     @property
     def sigma_states(self):
@@ -303,6 +317,10 @@ class LDSStates(object):
     @property
     def C(self):
         return self.model.C
+
+    @property
+    def D(self):
+        return self.model.D
 
     @property
     def sigma_obs(self):

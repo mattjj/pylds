@@ -384,7 +384,7 @@ cdef inline double condition_on(
     # temps
     double[:] temp_p, double[:,:] temp_pn, double[:,:] temp_pp,
     ) nogil:
-    cdef int p = C.shape[0], n = C.shape[1]
+    cdef int p = C.shape[0], n = C.shape[1], d = D.shape[1]
     cdef int nn = n*n, pp = p*p
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., ll = 0.
@@ -399,8 +399,6 @@ cdef inline double condition_on(
 
         # Compute temp_pn = C * sigma_x
         # and     temp_pp = chol(sigma_obs + C * sigma_x * C.T) = chol(S)
-        #
-        # First, temp_pn = C * sigma_x
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
         # Now temp_pp = sigma_obs
         dcopy(&pp, &sigma_obs[0,0], &inc, &temp_pp[0,0], &inc)
@@ -415,7 +413,7 @@ cdef inline double condition_on(
         # temp_p -= - C * mu_x = y - C * mu_x
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         # temp_p -= - D * u = y - C * mu_x - D * u
-        dgemv('T', &n, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
+        dgemv('T', &d, &p, &neg1, &D[0,0], &d, &u[0], &inc, &one, &temp_p[0], &inc)
 
         # Solve temp_p = temp_pp^{-1} temp_p
         #              = L^{-1} (y - C * mu_x)
@@ -429,7 +427,7 @@ cdef inline double condition_on(
 
         # Compute the conditional mean
         # mu_cond = mu_x + temp_pn * temp_p
-        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x)
+        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x - D * u)
         # Compare this to (18.31) of Murphy
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
@@ -466,7 +464,7 @@ cdef inline void predict(
     # temps
     double[:,:] temp_nn,
     ) nogil:
-    cdef int n = mu.shape[0]
+    cdef int n = mu.shape[0], d = B.shape[1]
     cdef int nn = n*n
     cdef int inc = 1
     cdef double one = 1., zero = 0.
@@ -477,7 +475,7 @@ cdef inline void predict(
     # mu_predict = A * mu
     dgemv('T', &n, &n, &one, &A[0,0], &n, &mu[0], &inc, &zero, &mu_predict[0], &inc)
     # mu_predict += B * u
-    dgemv('T', &n, &n, &one, &B[0,0], &n, &u[0], &inc, &one, &mu_predict[0], &inc)
+    dgemv('T', &d, &n, &one, &B[0,0], &d, &u[0], &inc, &one, &mu_predict[0], &inc)
 
     # temp_nn = A * sigma
     dgemm('T', 'N', &n, &n, &n, &one, &A[0,0], &n, &sigma[0,0], &n, &zero, &temp_nn[0,0], &n)
@@ -548,7 +546,8 @@ cdef inline void set_dynamics_stats(
 
 cdef inline double condition_on_diagonal(
     double[:] mu_x, double[:,:] sigma_x,
-    double[:,:] C, double[:] sigma_obs, double[:] y,
+    double[:,:] C, double[:,:] D, double[:] sigma_obs,
+    double[:] u, double[:] y,
     double[:] mu_cond, double[:,:] sigma_cond,
     double[::1] temp_p, double[::1,:] temp_nn,
     double[::1,:] temp_pn, double[::1,:] temp_pn2, double[::1,:] temp_pn3,
@@ -562,7 +561,7 @@ cdef inline double condition_on_diagonal(
     # an extra temp (temp_pn3) and an extra copy_transpose are needed because C
     # is not stored in Fortran order as solve_diagonal_plus_lowrank requires
 
-    cdef int p = C.shape[0], n = C.shape[1]
+    cdef int p = C.shape[0], n = C.shape[1], d = D.shape[1]
     cdef int nn = n*n, pn = p*n
     cdef int inc = 1, info = 0, i
     cdef double one = 1., zero = 0., neg1 = -1., ll = 0.
@@ -575,8 +574,12 @@ cdef inline double condition_on_diagonal(
         # NOTE: the C arguments are treated as transposed because C is
         # assumed to be in C order
 
+        # Compute residual
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
+        dgemv('T', &d, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
+
+        # Compute conditional mean and variance using low rank plus diagonal code
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
         copy_transpose(n, p, &C[0,0], &temp_pn3[0,0])
         dcopy(&p, &temp_p[0], &inc, &temp_pk[0,0], &inc)
@@ -693,7 +696,8 @@ cdef inline void sample_diagonal_gaussian(
 
 def test_condition_on_diagonal(
     double[:] mu_x, double[:,:] sigma_x,
-    double[:,:] C, double[:] sigma_obs, double[:] y,
+    double[:,:] C, double[:,:] D, double[:] sigma_obs,
+    double[:] u, double[:] y,
     double[:] mu_cond, double[:,:] sigma_cond):
     p = y.shape[0]
     n = mu_x.shape[0]
@@ -706,7 +710,7 @@ def test_condition_on_diagonal(
     temp_pk  = np.asfortranarray(np.random.randn(p,k))
     temp_nk  = np.asfortranarray(np.random.randn(n,k))
     return condition_on_diagonal(
-        mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond,
+        mu_x, sigma_x, C, D, sigma_obs, u, y, mu_cond, sigma_cond,
         temp_p, temp_nn, temp_pn, temp_pn2, temp_pn3, temp_pk, temp_nk)
 
 
