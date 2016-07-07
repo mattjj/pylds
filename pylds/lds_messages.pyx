@@ -521,9 +521,13 @@ cdef inline void rts_backward_step(
     double[:] next_smoothed_mu, double[:,:] next_smoothed_sigma,
     double[:,:] temp_nn, double[:,:] temp_nn2,  # temps
     ) nogil:
-    # TODO: Update this function.
+    # filtered_mu and filtered_sigma are m_{t|t} and P_{t|t}, respectively
+    # Recall, m_{t|t} = A * m_{t|t-1} + B * u_{t-1},
+    #    and, P_{t|t} = A * P_{t|t-1} * A.T + Q_t
+    # next_predict_mu and next_predict_sigma are m_{t+1|t} and P_{t+1|t}
+    # next_smoothed_mu and next_smoothed_sigma are m_{t+1|T} and P_{t+1|T}
 
-    # NOTE: on exit, temp_nn holds the RTS gain, called G_k' in the notation of
+    # NOTE: on exit, temp_nn holds the RTS gain, called G_k.T in the notation of
     # Thm 8.2 of Sarkka 2013 "Bayesian Filtering and Smoothing"
 
     cdef int n = A.shape[0]
@@ -532,17 +536,35 @@ cdef inline void rts_backward_step(
     cdef double one = 1., zero = 0., neg1 = -1.
 
     # NOTE: the A argument is treated as transposed because A is assumd to be in C order
+    # temp_nn = A * P_{t|t}
     dgemm('T', 'N', &n, &n, &n, &one, &A[0,0], &n, &filtered_sigma[0,0], &n, &zero, &temp_nn[0,0], &n)
     # TODO: could just call dposv directly instead of dpotrf+dpotrs
+    # temp_nn2 = P_{t+1|t}
     dcopy(&nn, &next_predict_sigma[0,0], &inc, &temp_nn2[0,0], &inc)
+    # temp_nn2 = chol(P_{t|t-1}, lower=True)
     dpotrf('L', &n, &temp_nn2[0,0], &n, &info)
+    # temp_nn = temp_nn2^{-1} temp_nn
+    #         = (P_{t+1|t})^{-1} A * P_k
+    #         = G_t^T
     dpotrs('L', &n, &n, &temp_nn2[0,0], &n, &temp_nn[0,0], &n, &info)
 
+    # next_predict_mu = m_{t+1|t} - m_{t+1|T} (negated version of notes)
     daxpy(&n, &neg1, &next_smoothed_mu[0], &inc, &next_predict_mu[0], &inc)
+    # filtered_mu = filtered_mu - temp_nn * next_predict_mu
+    #             = m_{t|t} - G_t^T * (m_{t|t-1} - m_{t+1|T})
+    #             = m_{t|t} + G_t^T * (m_{t+1|T} - m_{t|t-1})
+    #             = m_{t|T}
     dgemv('T', &n, &n, &neg1, &temp_nn[0,0], &n, &next_predict_mu[0], &inc, &one, &filtered_mu[0], &inc)
 
+    # next_predict_sigma = next_predict_sigma - next_smoothed_sigma
+    #                    = P_{t+1|t} - P_{t+1|T}
     daxpy(&nn, &neg1, &next_smoothed_sigma[0,0], &inc, &next_predict_sigma[0,0], &inc)
+    # temp_nn2 = -next_predict_sigma * temp_nn
+    #          = (P_{t+1|T} - P_{t+1|t}) * G_t^T
     dgemm('N', 'N', &n, &n, &n, &neg1, &next_predict_sigma[0,0], &n, &temp_nn[0,0], &n, &zero, &temp_nn2[0,0], &n)
+    # filtered_sigma = filtered_sigma + temp_nn * temp_nn2
+    #                = P_{t|t} + G_t (P_{t+1|T} - P_{t+1|t}) G_t^T
+    #                = P_{t|T}
     dgemm('T', 'N', &n, &n, &n, &one, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &one, &filtered_sigma[0,0], &n)
 
 
@@ -551,10 +573,23 @@ cdef inline void set_dynamics_stats(
     double[::1,:] GkT,
     double[:,::1] ExnxT,
     ) nogil:
-
+    # mk = m_{t|T}
+    # mkn = m_{t+1|T}
+    # Pkns = P_{t+1|T}
+    # GkT is the transpose of the RTS gain G_t = P_t A_t^T P_{t+1|t}^{-1}
+    # ExnxT = E[x_{t+1} x_t^T]
     cdef int n = mk.shape[0], inc = 1
     cdef double one = 1., zero = 0.
+    # E_xnxT = GkT.T * Pkns
+    #        = G_t * P_{t+1|T}
+    #        = P_t A_t
+    # Compare to Sarkka notes, this is the cross covariance, Cov(xn, x)
     dgemm('T', 'N', &n, &n, &n, &one, &GkT[0,0], &n, &Pkns[0,0], &n, &zero, &ExnxT[0,0], &n)
+    # Recall,
+    # Cov(xn, x) = E[(x_{t+1} - m_{t+1}) (x_t - m_t)^T]
+    #            = E[x_{t+1} x_t^T] - E[m_{t+1} x_t^T] - E[x_{t+1} m_t^T] + m_{t+1} m_t^T
+    #            = E[x_{t+1} x_t^T] - m_{t+1} m_t^T
+    # Add outer product of means to get E[x_{t+1] x_t^T]
     dger(&n, &n, &one, &mk[0], &inc, &mkn[0], &inc, &ExnxT[0,0], &n)
 
 
