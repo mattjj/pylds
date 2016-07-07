@@ -59,16 +59,16 @@ plt.ylabel('training likelihood')
 #  predicting  #
 ################
 
-Npredict = 100
-prediction_seed = data[:1700]
-
-predictions = model.sample_predictions(
-    prediction_seed, Npredict, obs_noise=False)
-
-plt.figure()
-plt.plot(data, 'b-')
-plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'r--')
-plt.xlabel('time index')
-plt.ylabel('prediction')
+# Npredict = 100
+# prediction_seed = data[:1700]
+#
+# predictions = model.sample_predictions(
+#     prediction_seed, Npredict, obs_noise=False)
+#
+# plt.figure()
+# plt.plot(data, 'b-')
+# plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'r--')
+# plt.xlabel('time index')
+# plt.ylabel('prediction')
 
 plt.show()

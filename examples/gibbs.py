@@ -84,6 +84,18 @@ plt.ylabel('log likelihood')
 
 
 ################
+#  smoothing   #
+################
+input_model.E_step()
+smoothed_states = input_model.states_list[0].smoothed_mus
+
+plt.figure()
+plt.plot(stateseq[:,0], '-b')
+plt.plot(smoothed_states[:,0],'-r')
+plt.show()
+
+
+################
 #  predicting  #
 ################
 

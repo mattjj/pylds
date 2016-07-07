@@ -60,13 +60,15 @@ class LDSStates(object):
 
         return stateseq
 
-    def sample_predictions(self, Tpred, states_noise, obs_noise):
-        # TODO Update
+    def sample_predictions(self, Tpred, inputs=None, states_noise=False, obs_noise=False):
+        inputs = np.zeros((Tpred, self.d)) if inputs is None else inputs
         _, filtered_mus, filtered_sigmas = kalman_filter(
-            self.mu_init, self.sigma_init, self.A, self.sigma_states, self.C,
-            self.sigma_obs, self.data)
+            self.mu_init, self.sigma_init,
+            self.A, self.B, self.sigma_states,
+            self.C, self.D, self.sigma_obs,
+            self.inputs, self.data)
 
-        init_mu = self.A.dot(filtered_mus[-1])
+        init_mu = self.A.dot(filtered_mus[-1]) + self.B.dot(self.inputs[-1])
         init_sigma = self.sigma_states + self.A.dot(
             filtered_sigmas[-1]).dot(self.A.T)
 
@@ -78,9 +80,11 @@ class LDSStates(object):
         states = np.empty((Tpred, self.n))
         states[0] = np.random.multivariate_normal(init_mu, init_sigma)
         for t in xrange(1,Tpred):
-            states[t] = self.A.dot(states[t-1]) + randseq[t-1]
+            states[t] = self.A.dot(states[t-1]) + \
+                        self.B.dot(inputs[t-1]) + \
+                        randseq[t-1]
 
-        obs = states.dot(self.C.T)
+        obs = states.dot(self.C.T) + inputs.dot(self.D.T)
         if obs_noise:
             L = np.linalg.cholesky(self.sigma_obs)
             obs += np.random.randn(Tpred, self.p).dot(L.T)
@@ -113,41 +117,82 @@ class LDSStates(object):
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = E_step(
                 self.mu_init, self.sigma_init,
-                self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.data)
+                self.A, self.B, self.sigma_states,
+                self.C, self.D, self.sigma_obs,
+                self.inputs, self.data)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     def _set_expected_stats(self,smoothed_mus,smoothed_sigmas,E_xtp1_xtT):
-        # TODO: Update with x u^T
         assert not np.isnan(E_xtp1_xtT).any()
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
 
-        data = self.data
+        inputs, data = self.inputs, self.data
+
+        # Now xx <- [x, u]
         EyyT = data.T.dot(data)
-        EyxT = data.T.dot(smoothed_mus)
+        EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
+        # E[xx xx^T] =
+        #  [[ E[xxT], E[xuT] ],
+        #   [ E[uxT], E[uuT] ]]
         ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+        ExuT = smoothed_mus.T.dot(inputs)
+        EuuT = inputs.T.dot(inputs)
 
-        E_xt_xtT = \
-            ExxT - (smoothed_sigmas[-1]
-                    + np.outer(smoothed_mus[-1],smoothed_mus[-1]))
-        E_xtp1_xtp1T = \
-            ExxT - (smoothed_sigmas[0]
-                    + np.outer(smoothed_mus[0], smoothed_mus[0]))
+        ExuxuT = np.asarray(
+            np.bmat([[ExxT,   ExuT],
+                     [ExuT.T, EuuT]]))
 
+        # Account for the stats from all but the last time bin
+        Exm1xm1T = \
+            smoothed_sigmas[-1] + \
+            np.outer(smoothed_mus[-1],smoothed_mus[-1])
+        Exm1um1T = np.outer(smoothed_mus[-1], inputs[-1])
+        Eum1um1T = np.outer(inputs[-1], inputs[-1])
+        Exum1xum1T = \
+            np.asarray(np.bmat(
+                [[Exm1xm1T,   Exm1um1T],
+                [Exm1um1T.T, Eum1um1T]]))
+
+        E_xut_xutT = ExuxuT - Exum1xum1T
+
+        # Account for the stats from all but the last time bin
+        Ex0x0T = \
+            smoothed_sigmas[0] + \
+            np.outer(smoothed_mus[0], smoothed_mus[0])
+        Ex0u0T = np.outer(smoothed_mus[0], inputs[0])
+        Eu0u0T = np.outer(inputs[0], inputs[0])
+        Exu0xu0T = \
+            np.asarray(np.bmat(
+                [[Ex0x0T, Ex0u0T],
+                [Ex0u0T.T, Eu0u0T]]))
+
+        E_xutp1_xutp1T = ExuxuT - Exu0xu0T
+
+        # Compute the total statistics by summing over all time
+        # E[(xp1, up1) (x, u)^T] =
+        #  [[ E[xp1 xT], E[xp1 uT] ],
+        #   [ E[up1 xT], E[up1 uT] ]]
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
+        E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
+        E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
+        E_utp1_utT = inputs[1:].T.dot(inputs[:-1])
+        E_xutp1_xutT = \
+            np.asarray(np.bmat(
+                [[E_xtp1_xtT, E_xtp1_utT],
+                 [E_utp1_xtT, E_utp1_utT]]))
 
         def is_symmetric(A):
             return np.allclose(A,A.T)
 
-        assert is_symmetric(ExxT)
-        assert is_symmetric(E_xt_xtT)
-        assert is_symmetric(E_xtp1_xtp1T)
+        assert is_symmetric(ExuxuT)
+        assert is_symmetric(E_xut_xutT)
+        assert is_symmetric(E_xutp1_xutp1T)
 
-        self.E_emission_stats = np.array([EyyT, EyxT, ExxT, self.T])
-        self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T-1])
+        self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
+        self.E_dynamics_stats = np.array([E_xutp1_xutp1T, E_xutp1_xutT, E_xut_xutT, self.T-1])
 
     # next two methods are for testing
 
