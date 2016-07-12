@@ -113,7 +113,7 @@ class LDSStates(object):
     ### EM
 
     def E_step(self):
-        # TODO: Update
+        # TODO: Update normalizer?
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = E_step(
                 self.mu_init, self.sigma_init,
@@ -197,9 +197,53 @@ class LDSStates(object):
     # next two methods are for testing
 
     def info_E_step(self):
-        data = self.data
-        A, sigma_states, C, sigma_obs = \
-            self.A, self.sigma_states, self.C, self.sigma_obs
+        """
+        Info form (natural parameterization of the Gaussian) expectations.
+        Compute marginal E[x_t | y_{1:T}] = N(x_t | J_t, h_t)
+        where J_t = Sigma_t^{-1}
+              h_t = Sigma_t^{-1} mu_t
+
+        Write p(x_{t+1} | x_t) = psi(x_{t+1}, x_t)
+            = exp(-1/2 [x_t, x_{t+1}]^T [J_11 J_12] [x_t    ]
+                                        [J_21 J_22] [x_{t+1}]
+
+                    + [h_1, h_2]^T [x_t    ]
+                                   [x_{t+1}]
+
+                    + log Z)
+
+        In an LDS in standard form (Q = dynamics noise)
+            J_11 = A^T Q^{-1} A
+            J_12 = -A^T Q^{-1}
+            J_21 = J_12^T
+            J_22 = Q^{-1}
+
+            h_1 = - u^T B^T Q^{-1} A
+            h_2 =   u^T B^T Q^{-1}
+
+        Combined with the following message passing prior,
+            p(x_t) = exp(-1/2 x_t^T J_t x_t + h_t^T x_t - log Z_t),
+
+        we obtain a joint distribution with info form parameters:
+
+        Jjoint = [J_11 + J_t,     J_12]
+                 [J_21            J_22]
+
+        hjoint = [h_1 + h_t,      h_2]
+
+        Furthermore, assume the observation potentials are Gaussian:
+
+        psi(x_t, y_t)
+            = exp(-1/2 x_t^T J_node x_t + h_node^T x_t + log Z_node)
+
+        where, with R = observation noise,
+            J_node = C^T R^{-1} C
+            h_node = (y - Du)^T R^{-1} C
+
+        """
+        inputs, data = self.inputs, self.data
+        A, B, sigma_states = self.A, self.B, self.sigma_states
+        C, D, sigma_obs = self.C, self.D, self.sigma_obs
 
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
@@ -208,21 +252,34 @@ class LDSStates(object):
         J_pair_21 = -np.linalg.solve(sigma_states, A)
         J_pair_22 = np.linalg.inv(sigma_states)
 
+        h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
+        h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
+
         J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
-        h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
+        h_node = np.einsum('ik,ij,tj->tk',
+                           C, np.linalg.inv(sigma_obs),
+                           (data - inputs.dot(D.T)))
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
-                J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
+                J_init,h_init,
+            J_pair_11,J_pair_21,J_pair_22,
+            h_pair_1,h_pair_2,
+            J_node,h_node)
         self._normalizer += self._extra_loglike_terms(
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.data)
+            self.A, self.B, self.sigma_states,
+            self.C, self.D, self.sigma_obs,
+            self.mu_init, self.sigma_init,
+            self.inputs, self.data)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     @staticmethod
-    def _extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
+    def _extra_loglike_terms(A, B, sigma_states,
+                             C, D, sigma_obs,
+                             mu_init, sigma_init,
+                             inputs, data):
         p, n = C.shape
         T = data.shape[0]
         out = 0.
@@ -231,11 +288,11 @@ class LDSStates(object):
         out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
         out -= n/2. * np.log(2*np.pi)
 
-        out -= (T-1)/2. * np.linalg.slogdet(BBT)[1]
+        out -= (T-1)/2. * np.linalg.slogdet(sigma_states)[1]
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
-        out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
-        out -= T/2. * np.linalg.slogdet(DDT)[1]
+        out -= 1./2 * np.einsum('ij,ti,tj->', np.linalg.inv(sigma_obs), data, data)
+        out -= T/2. * np.linalg.slogdet(sigma_obs)[1]
         out -= T*p/2 * np.log(2*np.pi)
 
         return out
