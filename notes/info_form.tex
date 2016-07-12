@@ -1,0 +1,252 @@
+\documentclass{article}
+
+\usepackage[numbers, compress]{natbib}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+
+\usepackage{amsthm,amsmath,amssymb}
+\usepackage{macros}
+\usepackage{subcaption}
+\usepackage[textfont=small, labelfont=small]{caption}
+\usepackage{graphicx}
+\DeclareGraphicsExtensions{.pdf,.png,.jpg,.eps}
+
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\usepackage[color=yellow]{todonotes}
+\usepackage{booktabs}
+\usepackage[inline]{enumitem}
+\usepackage{verbatim}
+
+\usepackage[margin=1in]{geometry}
+
+\usepackage{setspace}
+
+
+\title{Information form filtering and smoothing for Gaussian linear dynamical systems}
+
+\author{Scott W. Linderman 
+  \and
+  Matthew J. Johnson 
+}
+
+
+\begin{document}
+
+\singlespacing
+\maketitle
+\onehalfspacing
+
+The \emph{information form} of the Gaussian distribution is defined as,
+\begin{align}
+  p(x \given J, h) 
+  &=  \exp \left \{ -\frac{1}{2} x^\trans J x + h^\trans x - \log Z \right \},
+\end{align}
+where
+\begin{align}
+  \log Z = \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2}\log |J|.
+\end{align}
+The standard formulation is recovered by the transformations,  $\Sigma = J^{-1}$, and
+$\mu = J^{-1} h$. The advantage of working in the information form is that 
+it corresponds to the natural parameterization of the Gaussian distribution, and
+mean field variational inference is considerably easier with this form.
+
+In order to perform Kalman filtering and smoothing, we must be able to perform
+two operations: \emph{conditioning} and \emph{marginalization}. 
+
+\paragraph{Conditioning}
+If,
+\begin{align}
+  p(x) &= \distNormal(x \given J, h) \\
+  p(y \given x) &\propto \distNormal(x \given J_{\sf obs}, h_{\sf obs}) 
+\end{align}
+then,
+\begin{align}
+  p(x \given y) &= \distNormal(x \given J + J_{\sf obs}, h + h_{\sf obs}).
+\end{align}
+
+\paragraph{Marginalization}
+If,
+\begin{align}
+  \begin{bmatrix} x \\ y  \end{bmatrix}
+  &\sim
+  \distNormal \left(
+  \begin{bmatrix} 
+    J_{xx}        & J_{xy} \\
+    J_{xy}^\trans & J_{yy} 
+  \end{bmatrix},
+  \begin{bmatrix} h_{x} \\ h_y \end{bmatrix}
+  \right),
+\end{align}
+then,
+\begin{align}
+  x &\sim \distNormal(
+        J_{xx} - J_{xy}J_{yy}^{-1} J_{xy}^\trans, \;
+        h_x - J_{xy} J_{yy}^{-1} h_y)
+\end{align}
+
+\section*{Filtering, Sampling, and Smoothing}
+By interleaving these two steps we can filter, sample, and smooth the latent states
+in a linear dynamical system. Take the model,
+\begin{align}
+  x_1 &\sim \distNormal(\mu_1, Q_1) \\
+  x_{t+1} &\sim \distNormal(A_t x_t + B_t u_t, Q_t) \\
+  y_t &\sim \distNormal(C_t x_t + D_t u_t, R_t).
+\end{align}
+In information form, the initial distribution is,
+\begin{align}
+  % initi
+  x_1 &\sim \distNormal(J=Q_1^{-1}, h = Q_1^{-1} mu_1).
+\end{align}
+The dynamics are given by,
+\begin{align}
+  % dynamics
+  p(x_{t+1} \given x_t) & \propto 
+  \distNormal \left(
+  \begin{bmatrix} x_t \\ x_{t+1}  \end{bmatrix}
+  \, \bigg| \,
+  \begin{bmatrix} 
+    J_{11}        & J_{12} \\
+    J_{12}^\trans & J_{22} 
+  \end{bmatrix},
+  \begin{bmatrix} h_{1} \\ h_2 \end{bmatrix}
+  \right), 
+\end{align}
+with,
+\begin{align}
+  J_{11} &= A_t^\trans Q_t^{-1} A_t, \quad 
+  J_{12} = -A_t^\trans Q_t^{-1} \quad
+  J_{22} = Q_t^{-1} \quad
+  h_1 = -u_t^\trans B_t^\trans Q_t^{-1} A_t \quad
+  h_2 = u_t^\trans B_t Q_t^{-1}.
+\end{align}
+Finally, the observations are given by,
+\begin{align}
+  p(y_t \given x_t) 
+  &\propto \distNormal(x_t \given J_{\sf obs}, h_{\sf obs}) 
+\end{align}
+with
+\begin{align}
+  J_{\sf obs} = C_t^\trans R_t^{-1} C_t \quad
+  h_{\sf obs} = (y_t - D_t u_t)^\trans R_t^{-1} C_t
+\end{align}
+
+\subsection*{Filtering}
+We seek the conditional distribution,~$p(x_t \given y_{1:t})$, which 
+will be Gaussian. We begin with the initial distribution, 
+\begin{align}
+  p(x_1) &= \distNormal(x_1 \given J_{1 \given 0}, h_{1 \given 0}).
+\end{align}
+Assume, inductively, that~$x_t \given y_{1:t-1} \sim \distNormal(J_{t|t-1}, h_{t|t-1})$. Conditioning on the~$t$-th observation yields,
+Conditioned on the first observation,
+\begin{align}
+  p(x_t \given y_{1:t}) &= \distNormal(x_t \given J_{t|t}, h_{t|t}), \\
+  J_{t|t} &= J_{t|t-1} + J_{\sf obs} \\
+  h_{t|t} &= h_{t|t-1} + h_{\sf obs}.
+\end{align}
+Then, we predict the next latent state by writing the joint distribution of~$x_t$ and~$x_{t+1}$ and marginalizing out~$x_t$.
+\begin{align}
+  p(x_{t+1} \given y_{1:t}) &= p(x_t \given y_{1:t}) \, p(x_{t+1} \given x_t) \\
+  &= \distNormal(x_t \given J_{t+1|t}, h_{t+1|t}) \\
+  J_{t+1|t} &= J_{22} - J_{21} (J_{t|t} + J_{11})^{-1}J_{21}^\trans \\
+  h_{t+1|t} &= h_2 - J_{21} (J_{t|t} + J_{11})^{-1} (h_{t|t} + h_1)
+\end{align}.
+This completes one iteration and provides the input to the next. To start the recursion, we initialize,
+\begin{align}
+  J_{1|0} = \Sigma_{\sf init}^{-1}, \quad
+  h_{1|0} = \Sigma_{\sf init}^{-1} \, \mu_{\sf init}.
+\end{align}
+
+\subsection*{Backward Sampling}
+Having computed~$J_{t|t}$ and~$h_{t|t}$, we the proceed backward in time to draw a joint sample of the latent states. 
+Given~$J_{t|t}$,~$h_{t|t}$, and~$x_{t+1}$, we have,
+\begin{align}
+  p(x_{t} \given y_{1:t}, x_{t+1}) &\propto p(x_t \given y_{1:T}) \, p(x_{t+1} \given x_t) \\
+  &\propto \distNormal(x_t \given J_{t|t}, h_{t|t})  \;
+    \distNormal(x_t \given J_{11}, \, h_1 - x_{t+1}^\trans J_{21} ) \\
+  &\propto     \distNormal(x_t \given J_{t|t} + J_{11}, \; h_{t|t} + h_1 - x_{t+1}^\trans J_{21} )
+\end{align}
+We sample~$x_t$ from this conditional, then use it to sample~$x_{t-1}$, and repeat until we reach~$x_1$.
+
+\subsection*{Rauch-Tung-Striebel Smoothing}
+Next we seek the conditional distribution given all the data,~$p(x_t \given y_{1:T})$. 
+This will again be Gaussian, and we will call its parameters~$J_{t|T}$ and~$h_{t|T}$. 
+Assume, inductively, that we have computed~$J_{t+1|T}$ and~$h_{t+1|T}$. We show how to 
+compute the parameters for time~$t$.
+
+From the Markov properties of the model and the conditional distribution derived above, we have,
+\begin{align}
+  p(x_t \given x_{t+1}, y_{1:T}) 
+  &= \distNormal(x_t \given J_{t|t} + J_{11}, \; h_{t|t} + h_1 - J_{12} x_{t+1}).
+\end{align}
+Expanding, taking care to note that~$x_{t+1}$ appears in the normalizing constant, yields,
+\begin{multline}
+  p(x_t \given x_{t+1}, y_{1:T}) 
+  = \exp \bigg \{-\frac{1}{2} x_t^\trans (J_{t|t} + J_{11}) x_t + (h_{t|t} + h_1)^\trans x_t - x_{t+1}^\trans J_{12} x_t 
+  \\ 
+-\frac{1}{2} x_{t+1}^\trans J_{12}^\trans (J_{t|t} + J_{11})^{-1} J_{12} x_{t+1} 
++(h_{t|t} + h_1)^\trans (J_{t|t} + J_{11})^{-1} J_{12} x_{t+1} \\
+- \frac{1}{2} (h_{t|t} + h_1)^\trans (J_{t|t} + J_{11})^{-1} (h_{t|t} + h_1) 
+    \bigg \}
+\end{multline}
+
+Now consider the joint distribution of~$x_t$ and~$x_{t+1}$ given all the data,
+\begin{align}
+  p(x_t, x_{t+1} \given y_{1:T}) 
+  &= p(x_t \given x_{t+1}, y_{1:T}) p(x_{t+1} \given y_{1:T}) \\
+  &\propto \distNormal \left(
+  \begin{bmatrix} x_t \\ x_{t+1}  \end{bmatrix}
+  \, \bigg| \,
+  \begin{bmatrix} 
+    \widetilde{J}_{11}        & \widetilde{J}_{12} \\
+    \widetilde{J}_{12}^\trans & \widetilde{J}_{22} 
+  \end{bmatrix},
+  \begin{bmatrix} 
+    \widetilde{h}_1 \\ 
+    \widetilde{h}_2 
+  \end{bmatrix}
+  \right), 
+\end{align}
+with,
+\begin{align}
+  \widetilde{J}_{11} &= J_{t|t} + J_{11} \\ 
+  \widetilde{J}_{12} &= J_{12} \\
+  \widetilde{J}_{22} &= J_{t+1|T} + J_{12}^\trans (J_{t|t} + J_{11})^{-1} J_{12} \\
+  \widetilde{h}_1 &= h_{t|t} + h_1 \\
+  \widetilde{h}_2 &= h_{t+1|T} + (h_{t|t} + h_1)^\trans (J_{t|t} + J_{11})^{-1} J_{12}.
+\end{align}
+Recall that,
+\begin{align}
+  J_{t+1|t} &= J_{22} - J_{21} (J_{t|t} + J_{11})^{-1}J_{21}^\trans \\
+  h_{t+1|t} &= h_2 - J_{21} (J_{t|t} + J_{11})^{-1} (h_{t|t} + h_1).
+\end{align}
+Thus, 
+\begin{align}
+  \widetilde{J}_{22} &= J_{t+1|T} - J_{t+1|t} + J_{22} \\
+  \widetilde{h}_{2} &= h_{t+1|T} - h_{t+1|t} + h_2.
+\end{align}
+
+
+Finally, marginalize,
+\begin{align}
+  p(x_t \given y_{1:T}) 
+  &= \distNormal(x_t \given 
+    \widetilde{J}_{11} - \widetilde{J}_{12} \widetilde{J}_{22}^{-1} \widetilde{J}_{12}^\trans, \;
+    \widetilde{h}_{1} - \widetilde{J}_{12} \widetilde{J}_{22}^{-1} \widetilde{h}_2) \\
+  &= \distNormal(x_t \given J_{t|T}, h_{t|T}).
+\end{align}
+Substituting the simplified forms above yields,
+\begin{align}
+  J_{t|T} &= J_{t|t} + J_{11} - J_{12} (J_{t+1|T} - J_{t+1|t} + J_{22})^{-1} J_{12}^\trans \\
+  h_{t|T} &= h_{t|t} + h_1 - J_{12} (J_{t+1|T} - J_{t+1|t} + J_{22})^{-1} (h_{t+1|T} - h_{t+1|t} +h_2).
+\end{align}
+
+\end{document}
