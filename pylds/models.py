@@ -359,19 +359,21 @@ class NonstationaryLDS(
 # TODO make data-dependent default constructors
 # TODO make a constructor that takes A, B, C, D
 
-from pybasicbayes.distributions import Regression, AutoRegression
+from pybasicbayes.distributions import Regression
 
 
-def DefaultLDS(n, p):
+def DefaultLDS(n, p, d=0):
     model = LDS(
-        dynamics_distn=AutoRegression(
-            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
+        dynamics_distn=Regression(
+            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n+d)), K_0=n*np.eye(n+d)),
         emission_distn=Regression(
-            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n)), K_0=p*np.eye(n)))
+            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n+d)), K_0=p*np.eye(n+d)))
 
     model.A = 0.99*np.eye(n)
+    model.B = 0.1 * np.random.randn(n,d)
     model.sigma_states = np.eye(n)
     model.C = np.random.randn(p, n)
+    model.D = np.random.randn(p, d)
     model.sigma_obs = 0.1*np.eye(p)
 
     return model

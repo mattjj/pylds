@@ -240,11 +240,16 @@ cdef inline double info_predict(
     dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
 
     lognorm += info_lognorm_destructive(temp_nn, temp_n)  # mutates temp_n and temp_nn
+    # Now temp_nn = chol(J+J11), temp_n = chol(J+J11)^{-1} (h+h1)
+    # Solve again so that temp_n = (J+J11)^{-1} (h+h1)
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+    # Finally, subtract J21 (J+J11)^{-1} (h+h1)
     # NOTE: transpose because J21 is in C-major order
     dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hpredict[0], &inc)
 
+    # Solve again to get temp_nn2 = (J+J11)^{-1}J_12
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
+    # Finally, subtract to get Jp = J22 - J21 (Jf+J11)^{-1} J21
     # TODO this call aliases pointers, should really call dsyrk and copy lower to upper
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
     # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)

@@ -430,13 +430,15 @@ cdef inline double condition_on(
         if d > 0:
             dgemv('T', &d, &p, &neg1, &D[0,0], &d, &u[0], &inc, &one, &temp_p[0], &inc)
         # Solve temp_p = temp_pp^{-1} temp_p
-        #              = L^{-1} (y - C * mu_x)
+        #              = L^{-1} (y - C * mu_x - D * u)
         dtrtrs('L', 'N', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
-        # log likelihood = -1/2 * ||L^{-1} (y - C * mu_x)||*2
+        # log likelihood = -1/2 * ||L^{-1} (y - C * mu_x - D * u)||*2
+        #                = -1/2 (y-yhat)^T (sigma_obs + C sigma_x C.T)^{-1} (y-yhat)
         ll = (-1./2) * dnrm2(&p, &temp_p[0], &inc)**2
+
         # Second solve with cholesky
         # temp_p = L.T^{-1} temp_p
-        #        = S^{-1} (y - C * mu_x)
+        #        = S^{-1} (y - C * mu_x - D * u)
         dtrtrs('L', 'T', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
 
         # Compute the conditional mean

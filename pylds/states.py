@@ -300,18 +300,27 @@ class LDSStates(object):
                              C, D, sigma_obs,
                              mu_init, sigma_init,
                              inputs, data):
+        # TODO: Update with h_pair_1 and h_pair_2
         p, n = C.shape
         T = data.shape[0]
         out = 0.
 
+        # Initial distribution
         out -= 1./2 * mu_init.dot(np.linalg.solve(sigma_init,mu_init))
         out -= 1./2 * np.linalg.slogdet(sigma_init)[1]
         out -= n/2. * np.log(2*np.pi)
 
+        # Dynamics distribution
         out -= (T-1)/2. * np.linalg.slogdet(sigma_states)[1]
         out -= (T-1)*n/2. * np.log(2*np.pi)
+        out -= 1./2 * np.einsum('ij,ti,tj->', B.T.dot(np.linalg.solve(sigma_states, B)), inputs, inputs)
 
-        out -= 1./2 * np.einsum('ij,ti,tj->', np.linalg.inv(sigma_obs), data, data)
+        # Observation distribution
+        sigma_obs_inv = np.linalg.inv(sigma_obs)
+        dt = inputs.dot(D.T)
+        out -= 1./2 * np.einsum('ij,ti,tj->', sigma_obs_inv, data, data)
+        out += np.einsum('ij,ti,tj->', sigma_obs_inv, data, dt)
+        out -= 1./2 * np.einsum('ij,ti,tj->', sigma_obs_inv, dt, dt)
         out -= T/2. * np.linalg.slogdet(sigma_obs)[1]
         out -= T*p/2 * np.log(2*np.pi)
 
@@ -320,15 +329,17 @@ class LDSStates(object):
     ### mean field
 
     def meanfieldupdate(self):
+        # TODO: Compute h_pair_1 and h_pair_2
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
-            self.dynamics_distn.meanfield_expectedstats()
+            get_params(self.dynamics_distn)
 
-        J_yy, J_yx, J_node, logdet_node = \
-            self.emission_distn.meanfield_expectedstats()
+        # h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
+        # h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
 
+        J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
         h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
@@ -349,18 +360,22 @@ class LDSStates(object):
     @staticmethod
     def _info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, data):
+        # TODO: Update to compute terms with h_pair_1 and h_pair_2 if necessary
         p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
 
         out = 0.
 
+        # Initial distribution
         out -= 1./2 * h_init.dot(np.linalg.solve(J_init, h_init))
         out += 1./2 * np.linalg.slogdet(J_init)[1]
         out -= n/2. * np.log(2*np.pi)
 
+        # dynamics distribution
         out += 1./2 * logdet_pair.sum() if isinstance(logdet_pair, np.ndarray) \
             else (T-1)/2. * logdet_pair
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
+        # observation distribution
         contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
         out -= 1./2 * np.einsum(contract, J_yy, data, data)
         out += 1./2 * logdet_node.sum() if isinstance(logdet_node, np.ndarray) \
