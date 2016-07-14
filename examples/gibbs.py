@@ -99,16 +99,23 @@ plt.show()
 #  predicting  #
 ################
 
-# Npredict = 100
-# prediction_seed = data[:1700]
+Nseed = 1700
+Npredict = 100
+prediction_seed = data[:Nseed]
 
-# predictions = model.sample_predictions(
-#     prediction_seed, Npredict, obs_noise=False)
-#
-# plt.figure()
-# plt.plot(data, 'b-')
-# plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'r--')
-# plt.xlabel('time index')
-# plt.ylabel('prediction')
+input_preds = \
+    input_model.sample_predictions(
+        prediction_seed, Npredict,
+        inputs=inputs[Nseed:Nseed+Npredict])
+noinput_preds = \
+    noinput_model.sample_predictions(
+        prediction_seed, Npredict)
+
+plt.figure()
+plt.plot(data, 'b-')
+plt.plot(Nseed + np.arange(Npredict), input_preds, 'r--')
+plt.plot(Nseed + np.arange(Npredict), noinput_preds, 'g--')
+plt.xlabel('time index')
+plt.ylabel('prediction')
 
 plt.show()

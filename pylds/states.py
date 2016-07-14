@@ -68,7 +68,7 @@ class LDSStates(object):
             self.C, self.D, self.sigma_obs,
             self.inputs, self.data)
 
-        init_mu = self.A.dot(filtered_mus[-1]) + self.B.dot(self.inputs[-1])
+        init_mu = self.A.dot(filtered_mus[-1]) + self.B.dot(inputs[-1])
         init_sigma = self.sigma_states + self.A.dot(
             filtered_sigmas[-1]).dot(self.A.T)
 
@@ -192,7 +192,7 @@ class LDSStates(object):
         assert is_symmetric(E_xutp1_xutp1T)
 
         self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
-        self.E_dynamics_stats = np.array([E_xutp1_xutp1T, E_xutp1_xutT, E_xut_xutT, self.T-1])
+        self.E_dynamics_stats = np.array([E_xutp1_xutp1T[:self.n,:self.n], E_xutp1_xutT[:self.n,:], E_xut_xutT, self.T-1])
 
     # next two methods are for testing
 
@@ -309,7 +309,6 @@ class LDSStates(object):
     ### mean field
 
     def meanfieldupdate(self):
-        # TODO: Compute h_pair_1 and h_pair_2
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
@@ -320,15 +319,29 @@ class LDSStates(object):
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             get_params(self.dynamics_distn)
 
-        # h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
-        # h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
+        # TODO: Check the logic behind these expectations.
+        # Do we need to worry about correlations between A,B in E_BT_Qinv_A, for example?
+        E_Qinv = J_pair_22
+        E_AT_Qinv = J_pair_21[:,:self.n].T.copy("C")
+        E_BT_Qinv = J_pair_21[:,self.n:].T
+        E_BT_Qinv_A = E_BT_Qinv.dot(np.linalg.solve(E_Qinv, E_AT_Qinv.T))
+        E_AT_Qinv_A = J_pair_11[:self.n, :self.n].copy("C")
+        h_pair_1 = -self.inputs.dot(E_BT_Qinv_A)
+        h_pair_2 = self.inputs.dot(E_BT_Qinv)
 
         J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
-        h_node = self.data.dot(J_yx)
+        E_Rinv = J_yy
+        E_Rinv_C = J_yx[:,:self.n].copy("C")
+        E_Rinv_D = J_yx[:,self.n:].copy("C")
+        E_DT_Rinv_C = E_Rinv_D.T.dot(np.linalg.solve(E_Rinv, E_Rinv_C))
+        E_CT_Rinv_C = J_node[:self.n, :self.n].copy("C")
+
+        # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
+        h_node = self.data.dot(E_Rinv_C) - self.inputs.dot(E_DT_Rinv_C)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
-                J_init,h_init,J_pair_11,-J_pair_21,J_pair_22,J_node,h_node)
+                J_init,h_init,E_AT_Qinv_A,-E_AT_Qinv, E_Qinv, h_pair_1,h_pair_2,E_CT_Rinv_C,h_node)
         self._normalizer += self._info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
 
