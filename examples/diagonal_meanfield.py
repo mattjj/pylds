@@ -68,23 +68,23 @@ plt.ylabel('variational lower bound')
 ################
 #  smoothing   #
 ################
-# model.emission_distn.resample_from_mf()
 E_C,_,_,_ = model.emission_distn.mf_expectations
 smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T)
 
 ################
 #  predicting  #
 ################
-
+Nseed = 1700
 Npredict = 100
-prediction_seed = data[:1700]
+prediction_seed = data[:Nseed]
 
+model.emission_distn.resample_from_mf()
 predictions = model.sample_predictions(prediction_seed, Npredict)
 
 plt.figure()
-plt.plot(data, 'b-')
-plt.plot(smoothed_obs, 'r-')
-plt.plot(prediction_seed.shape[0] + np.arange(Npredict), predictions, 'g--')
+plt.plot(data, 'k')
+plt.plot(smoothed_obs[:Nseed], ':k')
+plt.plot(Nseed + np.arange(Npredict), predictions, 'b')
 plt.xlabel('time index')
 plt.ylabel('prediction')
 
