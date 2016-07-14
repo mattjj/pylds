@@ -43,19 +43,22 @@ def random_rotation(n,theta):
     return q.dot(out).dot(q.T)
 
 
-def lds_to_dense_infoparams(model,data):
+def lds_to_dense_infoparams(model,data,inputs):
     T, n = data.shape[0], model.n
 
     mu_init, sigma_init = model.mu_init, model.sigma_init
-    A, sigma_states = model.A, model.sigma_states
-    C, sigma_obs = model.C, model.sigma_obs
+    A, B, sigma_states = model.A, model.B,  model.sigma_states
+    C, D, sigma_obs = model.C, model.D, model.sigma_obs
+    ss_inv = np.linalg.inv(sigma_states)
 
     h = C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
+    h[1:] += inputs[:-1].dot(B.T).dot(ss_inv)
+    h[:-1] += -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states, A))
+    h += -inputs.dot(D.T).dot(np.linalg.solve(sigma_obs, C))
     h[0] += np.linalg.solve(sigma_init, mu_init)
 
     J = np.kron(np.eye(T),C.T.dot(np.linalg.solve(sigma_obs,C)))
     J[:n,:n] += np.linalg.inv(sigma_init)
-    ss_inv = np.linalg.inv(sigma_states)
     pairblock = bmat([[A.T.dot(ss_inv).dot(A), -A.T.dot(ss_inv)],
                       [-ss_inv.dot(A), ss_inv]])
     for t in range(0,n*(T-1),n):
@@ -103,7 +106,7 @@ def same_pairwise_secondmoments(model,(J,h)):
             for tp1,t in zip(blockslices[1:],blockslices[:-1]))
 
     model.E_step()
-    model_Extp1_xtT = model.states_list[0].E_dynamics_stats[1]
+    model_Extp1_xtT = model.states_list[0].E_dynamics_stats[1][:n, :n]
 
     assert np.allclose(dense_Extp1_xtT,model_Extp1_xtT)
 
@@ -111,17 +114,20 @@ def same_pairwise_secondmoments(model,(J,h)):
 def same_loglike(model,_):
     # NOTE: ignore the posterior (J,h) passed in so we can use the more
     # convenient prior info parameters
-    data = model.states_list[0].data
+    states = model.states_list[0]
+    data, inputs = states.data, states.inputs
     T = data.shape[0]
 
     C, model.C = model.C, np.zeros_like(model.C)
-    J,h = lds_to_dense_infoparams(model,data)
-    model.C = C
+    D, model.D = model.D, np.zeros_like(model.D)
+    J,h = lds_to_dense_infoparams(model,data,inputs)
+    model.C, model.D = C, D
 
     bigC = np.kron(np.eye(T),C)
+    bigD = np.kron(np.eye(T),D)
     mu_x = np.linalg.solve(J,h)
     sigma_x = np.linalg.inv(J)
-    mu_y = bigC.dot(mu_x)
+    mu_y = bigC.dot(mu_x) + bigD.dot(inputs.ravel())
     sigma_y = bigC.dot(sigma_x).dot(bigC.T) + np.kron(np.eye(T),model.sigma_obs)
     dense_loglike = multivariate_normal.logpdf(data.ravel(),mu_y,sigma_y)
 
@@ -130,22 +136,25 @@ def same_loglike(model,_):
     assert np.isclose(dense_loglike, model_loglike)
 
 
-def random_model(n,p,T):
+def random_model(n,p,d,T):
     data = np.random.randn(T,p)
-    model = DefaultLDS(n,p)
+    inputs = np.random.randn(T,d)
+    model = DefaultLDS(n,p,d)
     model.A = 0.99*random_rotation(n,0.01)
+    model.B = 0.1*np.random.randn(n,d)
     model.C = np.random.randn(p,n)
+    model.D = 0.1*np.random.randn(p,d)
 
-    J,h = lds_to_dense_infoparams(model,data)
-    model.add_data(data)
+    J,h = lds_to_dense_infoparams(model,data,inputs)
+    model.add_data(data, inputs=inputs)
 
     return model, (J,h)
 
 
 def check_random_model(check):
-    n, p = np.random.randint(2,5), np.random.randint(2,5)
+    n, p, d = np.random.randint(2,5), np.random.randint(2,5), np.random.randint(0,3)
     T = np.random.randint(10,20)
-    check(*random_model(n,p,T))
+    check(*random_model(n,p,d,T))
 
 
 def test_means():
