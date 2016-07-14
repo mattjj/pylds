@@ -5,7 +5,7 @@ from pybasicbayes.util.general import AR_striding
 from pybasicbayes.util.stats import mniw_expectedstats
 
 from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
-    info_E_step
+    info_E_step, filter_and_sample_diagonal, kalman_filter_diagonal
 
 
 class LDSStates(object):
@@ -82,22 +82,41 @@ class LDSStates(object):
 
         return obs
 
-    ### filtering
+    ### filtering and smoothing
 
     def filter(self):
-        self._normalizer, self.filtered_mus, self.filtered_sigmas = \
-            kalman_filter(
-                self.mu_init, self.sigma_init,
-                self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.data)
+        if self.diagonal_noise:
+            self._normalizer, self.filtered_mus, self.filtered_sigmas = \
+                kalman_filter_diagonal(
+                    self.mu_init, self.sigma_init,
+                    self.A, self.sigma_states, self.C, self.sigma_obs_flat,
+                    self.data)
+        else:
+            self._normalizer, self.filtered_mus, self.filtered_sigmas = \
+                kalman_filter(
+                    self.mu_init, self.sigma_init,
+                    self.A, self.sigma_states, self.C, self.sigma_obs,
+                    self.data)
+
+    def smooth(self):
+        # Use the info E step because it can take advantage of diagonal noise
+        # The standard E step could but we have not implemented it
+        self.info_E_step()
+        return self.smoothed_mus.dot(self.C.T)
 
     ### resampling
 
     def resample(self):
-        self._normalizer, self.stateseq = filter_and_sample(
-            self.mu_init, self.sigma_init,
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.data)
+        if self.diagonal_noise:
+            self._normalizer, self.stateseq = filter_and_sample_diagonal(
+                self.mu_init, self.sigma_init,
+                self.A, self.sigma_states, self.C, self.sigma_obs_flat,
+                self.data)
+        else:
+            self._normalizer, self.stateseq = filter_and_sample(
+                self.mu_init, self.sigma_init,
+                self.A, self.sigma_states, self.C, self.sigma_obs,
+                self.data)
 
     ### EM
 
@@ -154,8 +173,13 @@ class LDSStates(object):
         J_pair_21 = -np.linalg.solve(sigma_states, A)
         J_pair_22 = np.linalg.inv(sigma_states)
 
-        J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
-        h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
+        # Check if diagonal and avoid inverting D_obs x D_obs matrix
+        if self.diagonal_noise:
+            J_node = (C.T * 1./ self.sigma_obs_flat).dot(C)
+            h_node = np.einsum('ik,i,ti->tk', C, 1./self.sigma_obs_flat, data)
+        else:
+            J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
+            h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
@@ -192,18 +216,18 @@ class LDSStates(object):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
-        def get_params(distn):
-            return mniw_expectedstats(
-                *distn._natural_to_standard(distn.mf_natural_hypparam))
-
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
-            get_params(self.dynamics_distn)
-        J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
+            self.dynamics_distn.meanfield_expectedstats()
+
+        J_yy, J_yx, J_node, logdet_node = \
+            self.emission_distn.meanfield_expectedstats()
+
         h_node = self.data.dot(J_yx)
 
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
                 J_init,h_init,J_pair_11,-J_pair_21,J_pair_22,J_node,h_node)
+
         self._normalizer += self._info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
 
@@ -245,6 +269,10 @@ class LDSStates(object):
         return self.model.emission_distn
 
     @property
+    def diagonal_noise(self):
+        return self.model.diagonal_noise
+
+    @property
     def dynamics_distn(self):
         return self.model.dynamics_distn
 
@@ -279,6 +307,10 @@ class LDSStates(object):
     @property
     def sigma_obs(self):
         return self.model.sigma_obs
+
+    @property
+    def sigma_obs_flat(self):
+        return self.model.sigma_obs_flat
 
     @property
     def strided_stateseq(self):
