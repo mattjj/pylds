@@ -236,7 +236,7 @@ def check_filters(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, data
     assert np.isclose(partial_ll, py_partial_ll)
 
     # TODO: Log likelihood calculations are broken!
-    # assert np.isclose(ll, ll2)
+    assert np.isclose(ll, ll2)
 
 
 def test_info_filter():
@@ -256,7 +256,8 @@ def check_info_Estep(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, i
     ll2 = partial_ll + LDSStates._extra_loglike_terms(
         A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, inputs, data)
 
-    # assert np.isclose(ll,ll2)
+    # TODO: Log likelihood calculations are broken!
+    assert np.isclose(ll,ll2)
     assert np.allclose(smoothed_mus, smoothed_mus2)
     assert np.allclose(smoothed_sigmas, smoothed_sigmas2)
     assert np.allclose(ExnxT, ExnxT2)
