@@ -68,10 +68,10 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, states_noise=True, obs_noise=True):
+    def sample_predictions(self, data, Tpred, inputs=None, states_noise=True, obs_noise=True):
         self.add_data(data, generate=False)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred, states_noise, obs_noise)
+        return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
 
     # convenience properties
 
@@ -229,6 +229,10 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_update_emission_distn(self):
         self.emission_distn.meanfieldupdate(
             stats=(sum(s.E_emission_stats for s in self.states_list)))
+
+    def resample_from_mf(self):
+        self.dynamics_distn.resample_from_mf()
+        self.emission_distn.resample_from_mf()
 
     def vlb(self):
         vlb = 0.

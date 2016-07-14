@@ -101,7 +101,7 @@ def info_params(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, data, 
     J_pair_21 = -np.linalg.solve(sigma_states,A)
     J_pair_22 = np.linalg.inv(sigma_states)
 
-    h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
+    h_pair_1 = -inputs.dot(B.T).dot(np.linalg.solve(sigma_states,A))
     h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
 
     J_node = C.T.dot(np.linalg.solve(sigma_obs,C))
