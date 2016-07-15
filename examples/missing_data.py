@@ -59,10 +59,11 @@ model.add_data(data=data, mask=mask)
 ###############
 #  fit model  #
 ###############
-N_samples = 100
+N_samples = 500
 def update(model):
     # model.resample_model()
-    model.EM_step()
+    # model.EM_step()
+    model.meanfield_coordinate_descent_step()
     return model.log_likelihood()
 
 # Initialize with a few Gibbs iterations
