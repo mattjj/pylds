@@ -544,6 +544,25 @@ class LDSStatesMissingData(LDSStates):
 
         return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
 
+    @property
+    def extra_expected_info_params(self):
+        J_init = np.linalg.inv(self.sigma_init)
+        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+
+        _, _, _, logdet_pair = \
+            self.dynamics_distn.meanfield_expectedstats()
+
+        if self.diagonal_noise:
+            # Use the fact that the diagonalregression prior is factorized
+            _, _, E_sigmasq_inv, E_log_sigmasq = self.emission_distn.mf_expectations
+            J_yy = np.diag(E_sigmasq_inv)
+            logdet_node = -np.sum(E_log_sigmasq)
+
+        else:
+            raise NotImplementedError("Only supporting diagonal regression class right now")
+
+        return J_init, h_init, logdet_pair, J_yy, logdet_node, self.data * self.mask
+
     def log_likelihood(self):
         if self._normalizer is None:
             self._normalizer, _, _ = kalman_info_filter(*self.info_params)
@@ -583,6 +602,10 @@ class LDSStatesMissingData(LDSStates):
     def resample(self):
         self._normalizer, self.stateseq = info_sample(*self.info_params)
 
+        self._normalizer += self._extra_loglike_terms(
+            self.A, self.sigma_states, self.C, self.sigma_obs,
+            self.mu_init, self.sigma_init, self.mask * self.data)
+
     def E_step(self):
         return self.info_E_step()
 
@@ -591,8 +614,8 @@ class LDSStatesMissingData(LDSStates):
             E_xtp1_xtT = info_E_step(*self.expected_info_params)
 
         # TODO: Update the normalization code
-        # self._normalizer += self._info_extra_loglike_terms(
-        #     J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
+        self._normalizer += self._info_extra_loglike_terms(
+            *self.extra_expected_info_params)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
