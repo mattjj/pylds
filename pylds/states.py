@@ -533,11 +533,11 @@ class LDSStatesMissingData(LDSStates):
 
         if self.diagonal_noise:
             # Use the fact that the diagonalregression prior is factorized
-            E_W, E_WWT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
-            E_WWT_vec = E_WWT.reshape(self.p, -1)
+            E_C, E_CCT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
+            E_CCT_vec = E_CCT.reshape(self.p, -1)
             Jobs = self.mask * E_sigmasq_inv
-            J_node = (np.dot(Jobs, E_WWT_vec)).reshape((self.T, self.n, self.n))
-            h_node = (self.data * Jobs).dot(E_W)
+            J_node = (np.dot(Jobs, E_CCT_vec)).reshape((self.T, self.n, self.n))
+            h_node = (self.data * Jobs).dot(E_C)
 
         else:
             raise NotImplementedError("Only supporting diagonal regression class right now")
@@ -559,9 +559,12 @@ class LDSStatesMissingData(LDSStates):
         self._normalizer, self.filtered_mus, self.filtered_sigmas = \
             kalman_info_filter(*self.info_params)
 
+        # Update the normalization constant
+        self._normalizer += self._extra_loglike_terms(
+            self.A, self.sigma_states, self.C, self.sigma_obs,
+            self.mu_init, self.sigma_init, self.mask * self.data)
+
     def smooth(self):
-        # Use the info E step because it can take advantage of diagonal noise
-        # The standard E step could but we have not implemented it
         self.info_E_step()
         return self.smoothed_mus.dot(self.C.T)
 
