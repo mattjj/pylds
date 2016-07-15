@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from pybasicbayes.distributions import AutoRegression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import LDS, DefaultLDS
+from pylds.models import LDS
 
 npr.seed(0)
 
@@ -45,13 +45,8 @@ mask_len = mask_stop - mask_start
 mask[mask_start:mask_stop] = False
 
 ###############
-#  fit model  #
+#  make model #
 ###############
-
-def update(model):
-    model.resample_model()
-    return model.log_likelihood()
-
 model = LDS(
     dynamics_distn=AutoRegression(
             nu_0=D_latent+3,
@@ -61,7 +56,18 @@ model = LDS(
     emission_distn=DiagonalRegression(D_obs, D_latent))
 model.add_data(data=data, mask=mask)
 
-lls = [update(model) for _ in progprint_xrange(100)]
+###############
+#  fit model  #
+###############
+N_samples = 100
+def update(model):
+    # model.resample_model()
+    model.EM_step()
+    return model.log_likelihood()
+
+# Initialize with a few Gibbs iterations
+[model.resample_model() for _ in progprint_xrange(10)]
+lls = [update(model) for _ in progprint_xrange(N_samples)]
 
 plt.figure(figsize=(3,4))
 plt.plot(lls)
@@ -88,7 +94,6 @@ plt.ylabel('observation')
 plt.xlim([max(mask_start-mask_len, 0), min(mask_stop+mask_len, T)])
 plt.legend(loc="upper right")
 
-plt.show()
 
 ################
 #  predicting  #
