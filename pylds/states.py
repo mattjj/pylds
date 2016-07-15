@@ -1,11 +1,12 @@
 from __future__ import division
 import numpy as np
 
-from pybasicbayes.util.general import AR_striding
+from pybasicbayes.util.general import AR_striding, objarray
 from pybasicbayes.util.stats import mniw_expectedstats
 
 from pylds.lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
-    info_E_step, filter_and_sample_diagonal, kalman_filter_diagonal
+    info_E_step, filter_and_sample_diagonal, kalman_filter_diagonal, \
+    kalman_info_filter, info_sample
 
 
 class LDSStates(object):
@@ -468,3 +469,161 @@ class LDSStates(object):
     @property
     def strided_stateseq(self):
         return AR_striding(self.stateseq,1)
+
+
+class LDSStatesMissingData(LDSStates):
+    """
+    Some regression models can also handle missing observations. For example,
+    the DiagonalRegression class allows the data to be given along with a binary
+    mask that indicates whether the entry is present. In order to support that
+    here, we need to:
+        1. Update the constructor to take a mask
+        2. Update likelihood calculation to use info form, where Jnode (obs precision)
+           equals zero for missing observations.
+        3. Update filter and smooth to use info form.
+        4. Update the sampling code to use info form.
+        5. Update meanfield code to use info form.
+        6. Update the E_emission_stats to include pixel-wise latent state covariances
+
+    Since DiagonalRegression is the only emission model that supports
+    """
+
+    def __init__(self, model, mask=None, **kwargs):
+        super(LDSStatesMissingData, self).__init__(model, **kwargs)
+
+        self.mask = mask if mask is not None else np.ones_like(self.data, dtype=bool)
+
+    @property
+    def info_params(self):
+        J_init = np.linalg.inv(self.sigma_init)
+        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+
+        J_pair_11 = self.A.T.dot(np.linalg.solve(self.sigma_states, self.A))
+        J_pair_21 = -np.linalg.solve(self.sigma_states, self.A)
+        J_pair_22 = np.linalg.inv(self.sigma_states)
+
+        if self.diagonal_noise:
+            J_node_slow = np.array([(self.C.T * self.mask[t] / self.sigma_obs_flat).dot(self.C) for t in range(self.T)])
+            J_node = np.einsum('ji,tj,jk->tik', self.C, self.mask / self.sigma_obs_flat, self.C)
+            assert np.allclose(J_node, J_node_slow)
+            h_node_slow = np.einsum('ik,ti,ti->tk', self.C, self.mask / self.sigma_obs_flat, self.data)
+            h_node = (self.data * self.mask / self.sigma_obs_flat).dot(self.C)
+            assert np.allclose(h_node, h_node_slow)
+        else:
+            raise NotImplementedError("Only supporting diagonal regression class right now")
+
+        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, \
+               J_node, h_node
+
+    @property
+    def expected_info_params(self):
+        J_init = np.linalg.inv(self.sigma_init)
+        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+
+        J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
+            self.dynamics_distn.meanfield_expectedstats()
+
+        # Negate J_pair_21 (np.linalg.solve(sigma_states, A)
+        J_pair_21 = -J_pair_21
+
+        if self.diagonal_noise:
+            # Use the fact that the diagonalregression prior is factorized
+            E_W, E_WWT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
+            E_WWT_vec = E_WWT.reshape(self.p, -1)
+            Jobs = self.mask * E_sigmasq_inv
+            J_node = (np.dot(Jobs, E_WWT_vec)).reshape((self.T, self.n, self.n))
+            h_node = (self.data * Jobs).dot(E_W)
+
+        else:
+            raise NotImplementedError("Only supporting diagonal regression class right now")
+
+        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
+
+    def log_likelihood(self):
+        if self._normalizer is None:
+            self._normalizer, _, _ = kalman_info_filter(*self.info_params)
+        return self._normalizer
+
+    def filter(self):
+        if self.diagonal_noise:
+            self._normalizer, self.filtered_mus, self.filtered_sigmas = \
+                kalman_info_filter(*self.info_params)
+                # kalman_filter_diagonal(
+                #     self.mu_init, self.sigma_init,
+                #     self.A, self.sigma_states, self.C, self.sigma_obs_flat,
+                #     self.data)
+        else:
+            raise NotImplementedError("Only supporting diagonal regression class right now")
+
+
+    def smooth(self):
+        # Use the info E step because it can take advantage of diagonal noise
+        # The standard E step could but we have not implemented it
+        self.info_E_step()
+        return self.smoothed_mus.dot(self.C.T)
+
+    def info_E_step(self):
+        self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
+        E_xtp1_xtT = info_E_step(*self.info_params)
+        self._normalizer += self._extra_loglike_terms(
+            self.A, self.sigma_states, self.C, self.sigma_obs,
+            self.mu_init, self.sigma_init, self.data)
+
+        self._set_expected_stats(
+            self.smoothed_mus, self.smoothed_sigmas, E_xtp1_xtT)
+
+    def resample(self):
+        if self.diagonal_noise:
+            self._normalizer, self.stateseq = info_sample(*self.info_params)
+        else:
+            raise NotImplementedError("Only supporting diagonal regression class right now")
+
+    def E_step(self):
+        return self.info_E_step()
+
+    def meanfieldupdate(self):
+        self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
+            E_xtp1_xtT = info_E_step(*self.expected_info_params)
+
+        # TODO: Update the normalization code
+        # self._normalizer += self._info_extra_loglike_terms(
+        #     J_init, h_init, logdet_pair, J_yy, logdet_node, self.data)
+
+        self._set_expected_stats(
+            self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
+
+
+    def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
+        assert not np.isnan(E_xtp1_xtT).any()
+        assert not np.isnan(smoothed_mus).any()
+        assert not np.isnan(smoothed_sigmas).any()
+
+        p, n, T, data, mask = self.p, self.n, self.T, self.data, self.mask
+        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+
+        E_xt_xtT = \
+            ExxT - (smoothed_sigmas[-1]
+                    + np.outer(smoothed_mus[-1], smoothed_mus[-1]))
+        E_xtp1_xtp1T = \
+            ExxT - (smoothed_sigmas[0]
+                    + np.outer(smoothed_mus[0], smoothed_mus[0]))
+
+        E_xtp1_xtT = E_xtp1_xtT.sum(0)
+
+        def is_symmetric(A):
+            return np.allclose(A, A.T)
+
+        assert is_symmetric(ExxT)
+        assert is_symmetric(E_xt_xtT)
+        assert is_symmetric(E_xtp1_xtp1T)
+
+        self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
+
+        # Get the emission stats
+        E_ysq = np.sum(data**2 * mask, axis=0)
+        E_yxT = (data * mask).T.dot(smoothed_mus)
+        E_xxT_vec = smoothed_sigmas.reshape((T, n**2))
+        E_xxT = np.array([np.dot(self.mask[:, d], E_xxT_vec).reshape((n, n)) for d in range(p)])
+        Tp = np.sum(self.mask, axis=0)
+
+        self.E_emission_stats = objarray([E_ysq, E_yxT, E_xxT, Tp])

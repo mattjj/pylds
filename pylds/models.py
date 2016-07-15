@@ -6,7 +6,7 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from pylds.states import LDSStates
+from pylds.states import LDSStates, LDSStatesMissingData
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence
@@ -26,9 +26,13 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self, data, inputs=None, **kwargs):
+    def add_data(self,data, inputs=None, mask=None,**kwargs):
+        # TODO: Please please please clean me up!
         assert isinstance(data,np.ndarray)
-        self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
+        if mask is None:
+            self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
+        else:
+            self.states_list.append(LDSStatesMissingData(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
         return self
 
     def log_likelihood(self,data=None, inputs=None):
@@ -59,8 +63,8 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    def smooth(self, data, inputs=None):
-        self.add_data(data, inputs=inputs, generate=False)
+    def smooth(self, data, inputs=None, mask=None):
+        self.add_data(data, inputs=inputs, mask=mask, generate=False)
         s = self.states_list.pop()
         return s.smooth()
 
@@ -68,8 +72,8 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, inputs=None, states_noise=True, obs_noise=True):
-        self.add_data(data, generate=False)
+    def sample_predictions(self, data, Tpred, inputs=None, mask=None, states_noise=True, obs_noise=True):
+        self.add_data(data, mask=mask, generate=False)
         s = self.states_list.pop()
         return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
 
