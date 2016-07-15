@@ -193,13 +193,14 @@ class LDSStates(object):
                 J_init,h_init,J_pair_11,J_pair_21,J_pair_22,J_node,h_node)
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.data)
+            self.mu_init, self.sigma_init, self.data,
+            isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
     @staticmethod
-    def _extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data):
+    def _extra_loglike_terms(A, BBT, C, DDT, mu_init, sigma_init, data, isdiag=False):
         p, n = C.shape
         T = data.shape[0]
         out = 0.
@@ -211,7 +212,12 @@ class LDSStates(object):
         out -= (T-1)/2. * np.linalg.slogdet(BBT)[1]
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
-        out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
+        # Check diagonal
+        if isdiag:
+            out -= 1./2 * np.sum(data**2 / np.diag(DDT))
+        else:
+            out -= 1./2 * np.einsum('ij,ti,tj->',np.linalg.inv(DDT),data,data)
+
         out -= T/2. * np.linalg.slogdet(DDT)[1]
         out -= T*p/2 * np.log(2*np.pi)
 
@@ -248,7 +254,8 @@ class LDSStates(object):
 
     @staticmethod
     def _info_extra_loglike_terms(
-            J_init, h_init, logdet_pair, J_yy, logdet_node, data):
+            J_init, h_init, logdet_pair, J_yy, logdet_node, data,
+            isdiag=False):
         p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
 
         out = 0.
@@ -261,8 +268,13 @@ class LDSStates(object):
             else (T-1)/2. * logdet_pair
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
-        contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
-        out -= 1./2 * np.einsum(contract, J_yy, data, data)
+        if isdiag:
+            assert J_yy.ndim == 2
+            out -= 1./2 * np.sum(data**2 * np.diag(J_yy))
+        else:
+            contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
+            out -= 1./2 * np.einsum(contract, J_yy, data, data)
+
         out += 1./2 * logdet_node.sum() if isinstance(logdet_node, np.ndarray) \
             else T/2. * logdet_node
         out -= T*p/2. * np.log(2*np.pi)
@@ -356,8 +368,13 @@ class LDSStatesMissingData(LDSStates):
         J_pair_22 = np.linalg.inv(self.sigma_states)
 
         if self.diagonal_noise:
-            J_node = np.einsum('ji,tj,jk->tik', self.C, self.mask / self.sigma_obs_flat, self.C)
-            h_node = (self.data * self.mask / self.sigma_obs_flat).dot(self.C)
+            Jobs = self.mask / self.sigma_obs_flat
+            CCT = np.array([np.outer(cp,cp) for cp in self.C])
+            CCT_vec = np.reshape(CCT, (self.p,self.n**2))
+            J_node = (np.dot(Jobs, CCT_vec)).reshape((self.T, self.n, self.n))
+            # J_node2 = np.einsum('ji,tj,jk->tik', self.C, self.mask / self.sigma_obs_flat, self.C)
+            # assert np.allclose(J_node, J_node2)
+            h_node = (self.data * Jobs).dot(self.C)
         else:
             raise NotImplementedError("Only supporting diagonal regression class right now")
 
@@ -414,7 +431,8 @@ class LDSStatesMissingData(LDSStates):
             # Update the normalization constant
             self._normalizer += self._extra_loglike_terms(
                 self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.mu_init, self.sigma_init, self.mask * self.data)
+                self.mu_init, self.sigma_init, self.mask * self.data,
+                isdiag=self.diagonal_noise)
 
         return self._normalizer
 
@@ -425,7 +443,8 @@ class LDSStatesMissingData(LDSStates):
         # Update the normalization constant
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.mask * self.data)
+            self.mu_init, self.sigma_init, self.mask * self.data,
+            isdiag=self.diagonal_noise)
 
     def smooth(self):
         if not hasattr(self, "smoothed_mus"):
@@ -439,7 +458,8 @@ class LDSStatesMissingData(LDSStates):
 
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.mask * self.data)
+            self.mu_init, self.sigma_init, self.mask * self.data,
+            isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
             self.smoothed_mus, self.smoothed_sigmas, E_xtp1_xtT)
@@ -449,7 +469,8 @@ class LDSStatesMissingData(LDSStates):
 
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.mask * self.data)
+            self.mu_init, self.sigma_init, self.mask * self.data,
+            isdiag=self.diagonal_noise)
 
     def E_step(self):
         return self.info_E_step()
@@ -460,7 +481,8 @@ class LDSStatesMissingData(LDSStates):
 
         # TODO: Update the normalization code
         self._normalizer += self._info_extra_loglike_terms(
-            *self.extra_expected_info_params)
+            *self.extra_expected_info_params,
+            isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)

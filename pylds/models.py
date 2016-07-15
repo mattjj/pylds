@@ -15,7 +15,6 @@ from states import LDSStates, LDSStatesMissingData
 # emission_distn should probably be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
 
-
 ######################
 #  algorithm mixins  #
 ######################
@@ -186,7 +185,7 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
             [s.strided_stateseq for s in self.states_list])
 
     def resample_emission_distn(self):
-        xys = [np.hstack((s.stateseq, s.data)) for s in self.states_list]
+        xys = [(s.stateseq, s.data) for s in self.states_list]
         # Provide a mask if necessary
         if self.has_missing_data:
             masks = [s.mask for s in self.states_list]
