@@ -151,6 +151,14 @@ class LDSStates(object):
 
         inputs, data = self.inputs, self.data
 
+        # EyxT = data.T.dot(smoothed_mus)
+        #
+        # ExxT = smoothed_sigmas + \
+        #        self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+        #
+        # E_xtp1_xtp1T = ExxT[1:].sum(0)
+        # E_xt_xtT = ExxT[:-1].sum(0)
+
         # Now xx <- [x, u]
         EyyT = data.T.dot(data)
         EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
@@ -195,6 +203,7 @@ class LDSStates(object):
         # E[(xp1, up1) (x, u)^T] =
         #  [[ E[xp1 xT], E[xp1 uT] ],
         #   [ E[up1 xT], E[up1 uT] ]]
+
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
         E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
         E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
@@ -503,12 +512,8 @@ class LDSStatesMissingData(LDSStates):
         J_pair_22 = np.linalg.inv(self.sigma_states)
 
         if self.diagonal_noise:
-            J_node_slow = np.array([(self.C.T * self.mask[t] / self.sigma_obs_flat).dot(self.C) for t in range(self.T)])
             J_node = np.einsum('ji,tj,jk->tik', self.C, self.mask / self.sigma_obs_flat, self.C)
-            assert np.allclose(J_node, J_node_slow)
-            h_node_slow = np.einsum('ik,ti,ti->tk', self.C, self.mask / self.sigma_obs_flat, self.data)
             h_node = (self.data * self.mask / self.sigma_obs_flat).dot(self.C)
-            assert np.allclose(h_node, h_node_slow)
         else:
             raise NotImplementedError("Only supporting diagonal regression class right now")
 
@@ -542,19 +547,17 @@ class LDSStatesMissingData(LDSStates):
     def log_likelihood(self):
         if self._normalizer is None:
             self._normalizer, _, _ = kalman_info_filter(*self.info_params)
+
+            # Update the normalization constant
+            self._normalizer += self._extra_loglike_terms(
+                self.A, self.sigma_states, self.C, self.sigma_obs,
+                self.mu_init, self.sigma_init, self.mask * self.data)
+
         return self._normalizer
 
     def filter(self):
-        if self.diagonal_noise:
-            self._normalizer, self.filtered_mus, self.filtered_sigmas = \
-                kalman_info_filter(*self.info_params)
-                # kalman_filter_diagonal(
-                #     self.mu_init, self.sigma_init,
-                #     self.A, self.sigma_states, self.C, self.sigma_obs_flat,
-                #     self.data)
-        else:
-            raise NotImplementedError("Only supporting diagonal regression class right now")
-
+        self._normalizer, self.filtered_mus, self.filtered_sigmas = \
+            kalman_info_filter(*self.info_params)
 
     def smooth(self):
         # Use the info E step because it can take advantage of diagonal noise
@@ -563,20 +566,19 @@ class LDSStatesMissingData(LDSStates):
         return self.smoothed_mus.dot(self.C.T)
 
     def info_E_step(self):
-        self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
-        E_xtp1_xtT = info_E_step(*self.info_params)
+        self._normalizer, self.smoothed_mus, \
+        self.smoothed_sigmas, E_xtp1_xtT = \
+            info_E_step(*self.info_params)
+
         self._normalizer += self._extra_loglike_terms(
             self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.data)
+            self.mu_init, self.sigma_init, self.mask * self.data)
 
         self._set_expected_stats(
             self.smoothed_mus, self.smoothed_sigmas, E_xtp1_xtT)
 
     def resample(self):
-        if self.diagonal_noise:
-            self._normalizer, self.stateseq = info_sample(*self.info_params)
-        else:
-            raise NotImplementedError("Only supporting diagonal regression class right now")
+        self._normalizer, self.stateseq = info_sample(*self.info_params)
 
     def E_step(self):
         return self.info_E_step()
@@ -599,30 +601,26 @@ class LDSStatesMissingData(LDSStates):
         assert not np.isnan(smoothed_sigmas).any()
 
         p, n, T, data, mask = self.p, self.n, self.T, self.data, self.mask
-        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+        ExxT = smoothed_sigmas + \
+               self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
 
-        E_xt_xtT = \
-            ExxT - (smoothed_sigmas[-1]
-                    + np.outer(smoothed_mus[-1], smoothed_mus[-1]))
-        E_xtp1_xtp1T = \
-            ExxT - (smoothed_sigmas[0]
-                    + np.outer(smoothed_mus[0], smoothed_mus[0]))
-
+        E_xtp1_xtp1T = ExxT[1:].sum(0)
+        E_xt_xtT = ExxT[:-1].sum(0)
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
 
         def is_symmetric(A):
             return np.allclose(A, A.T)
 
-        assert is_symmetric(ExxT)
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)
 
         self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
 
         # Get the emission stats
+        # import ipdb; ipdb.set_trace()
         E_ysq = np.sum(data**2 * mask, axis=0)
         E_yxT = (data * mask).T.dot(smoothed_mus)
-        E_xxT_vec = smoothed_sigmas.reshape((T, n**2))
+        E_xxT_vec = ExxT.reshape((T, n**2))
         E_xxT = np.array([np.dot(self.mask[:, d], E_xxT_vec).reshape((n, n)) for d in range(p)])
         Tp = np.sum(self.mask, axis=0)
 
