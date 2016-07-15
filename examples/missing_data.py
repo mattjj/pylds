@@ -90,16 +90,40 @@ def meanfield_update(model):
     model.resample_from_mf()
     return model.log_likelihood()
 
+def svi_update(model, stepsize, minibatchsize):
+    # Sample a minibatch
+    start = np.random.randint(0,T-minibatchsize+1)
+    minibatch = data[start:start+minibatchsize]
+    minibatch_mask = mask[start:start+minibatchsize]
+    prob = minibatchsize/float(T)
+    model.meanfield_sgdstep(minibatch, prob, stepsize, masks=minibatch_mask)
+
+    sigma_obs_smpls.append(model.emission_distn.mf_beta / model.emission_distn.mf_alpha)
+    model.resample_from_mf()
+    return model.log_likelihood(data, mask=mask)
+
+
 # Gibbs
 # lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
 
-# EM -- initialized with a few Gibbs iterations
+## EM -- initialized with a few Gibbs iterations
 # [model.resample_model() for _ in progprint_xrange(100)]
 # lls = [em_update(model) for _ in progprint_xrange(N_samples)]
 
-# Mean field
-lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
+## Mean field
+# lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
 
+## SVI
+delay = 10.0
+forgetting_rate = 0.5
+stepsizes = (np.arange(N_samples) + delay)**(-forgetting_rate)
+minibatchsize = 500
+lls = [svi_update(model, stepsizes[itr], minibatchsize) for itr in progprint_xrange(N_samples)]
+
+
+################
+# likelihoods  #
+################
 plt.figure()
 plt.plot(sigma_obs_smpls)
 plt.xlabel("iteration")
@@ -110,7 +134,6 @@ plt.plot(lls,'-b')
 plt.plot([0,N_samples], truemodel.log_likelihood(data, mask) * np.ones(2), '-k')
 plt.xlabel('iteration')
 plt.ylabel('log likelihood')
-
 
 
 ################

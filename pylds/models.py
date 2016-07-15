@@ -234,8 +234,8 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
 
 
 class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):
-    def meanfield_sgdstep(self, minibatch, prob, stepsize, **kwargs):
-        states_list = self._get_mb_states_list(minibatch, **kwargs)
+    def meanfield_sgdstep(self, minibatch, prob, stepsize, masks=None, **kwargs):
+        states_list = self._get_mb_states_list(minibatch, masks, **kwargs)
         for s in states_list:
             s.meanfieldupdate()
         self._meanfield_sgdstep_parameters(states_list, prob, stepsize)
@@ -246,22 +246,26 @@ class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):
 
     def _meanfield_sgdstep_dynamics_distn(self, states_list, prob, stepsize):
         self.dynamics_distn.meanfield_sgdstep(
+            data=None, weights=None,
             stats=(sum(s.E_dynamics_stats for s in states_list)),
             prob=prob, stepsize=stepsize)
 
     def _meanfield_sgdstep_emission_distn(self, states_list, prob, stepsize):
         self.emission_distn.meanfield_sgdstep(
+            data=None, weights=None,
             stats=(sum(s.E_emission_stats for s in states_list)),
             prob=prob, stepsize=stepsize)
 
-    def _get_mb_states_list(self, minibatch, **kwargs):
+    def _get_mb_states_list(self, minibatch, masks, **kwargs):
         minibatch = minibatch if isinstance(minibatch,list) else [minibatch]
+        masks = [None] * len(minibatch) if masks is None else \
+            (masks if isinstance(masks, list) else [masks])
 
-        def get_states(data):
-            self.add_states(data, generate=False, **kwargs)
+        def get_states(data, mask):
+            self.add_data(data, mask=mask, generate=False, **kwargs)
             return self.states_list.pop()
 
-        return [get_states(data) for data in minibatch]
+        return [get_states(data, mask) for data, mask in zip(minibatch, masks)]
 
 
 class _NonstationaryLDSGibbsSampling(_LDSGibbsSampling):
@@ -312,7 +316,7 @@ class _NonstationaryLDSEM(_LDSEM):
 #  model classes  #
 ###################
 
-class LDS(_LDSGibbsSampling, _LDSMeanField, _LDSEM, _LDSBase):
+class LDS(_LDSGibbsSampling, _LDSMeanField, _LDSEM, _LDSMeanFieldSVI, _LDSBase):
     pass
 
 
