@@ -10,19 +10,27 @@ from pylds.models import LDS
 
 npr.seed(0)
 
+from pybasicbayes.util.profiling import show_line_stats
 
 #########################
 #  set some parameters  #
 #########################
-D_obs, D_latent = 4, 2
-mu_init = np.array([0.,1.])
-sigma_init = 0.01*np.eye(2)
+D_obs, D_latent = 4, 4
+mu_init = np.zeros(D_latent)
+mu_init[0] = 1.0
+sigma_init = 0.01*np.eye(D_latent)
 
-A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
-                   [np.sin(np.pi/24),  np.cos(np.pi/24)]])
-sigma_states = 0.01*np.eye(2)
+def random_rotation(n,theta):
+    rot = np.array([[np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta), np.cos(theta)]])
+    out = np.zeros((n,n))
+    out[:2,:2] = rot
+    q = np.linalg.qr(np.random.randn(n,n))[0]
+    return q.dot(out).dot(q.T)
 
-# C = np.array([[10.,0.]])
+A = random_rotation(D_latent, np.pi/24.)
+sigma_states = 0.01*np.eye(D_latent)
+
 C = np.random.randn(D_obs, D_latent)
 sigma_obs = 0.1 * np.eye(D_obs)
 
@@ -38,7 +46,7 @@ truemodel = LDS(
 truemodel.mu_init = mu_init
 truemodel.sigma_init = sigma_init
 
-T = 2000
+T = 1000
 data, stateseq = truemodel.generate(T)
 
 # Mask off a chunk of data
@@ -51,8 +59,6 @@ for i,offset in enumerate(range(0,T,chunksz)):
     if j == D_obs:
         mask[offset:min(offset+chunksz, T), :] = False
 
-true_ll = truemodel.log_likelihood()
-
 ###############
 #  make model #
 ###############
@@ -64,9 +70,6 @@ model = LDS(
             K_0=D_latent*np.eye(D_latent)),
     emission_distn=DiagonalRegression(D_obs, D_latent, alpha_0=2.0, beta_0=1.0))
 model.add_data(data=data, mask=mask)
-
-# print("True LL: ", truemodel.log_likelihood(data, mask))
-# print("Init LL: ", model.log_likelihood(data, mask))
 
 
 ###############
@@ -118,6 +121,7 @@ delay = 10.0
 forgetting_rate = 0.5
 stepsizes = (np.arange(N_samples) + delay)**(-forgetting_rate)
 minibatchsize = 500
+# [model.resample_model() for _ in progprint_xrange(100)]
 lls = [svi_update(model, stepsizes[itr], minibatchsize) for itr in progprint_xrange(N_samples)]
 
 
