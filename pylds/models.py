@@ -35,11 +35,11 @@ class _LDSBase(Model):
 
         return self
 
-    def log_likelihood(self,data=None):
+    def log_likelihood(self,data=None,mask=None):
         if data is not None:
             assert isinstance(data,(list,np.ndarray))
             if isinstance(data,np.ndarray):
-                self.add_data(data=data,generate=False)
+                self.add_data(data=data,mask=mask,generate=False)
                 return self.states_list.pop().log_likelihood()
             else:
                 return sum(self.log_likelihood(d) for d in data)
@@ -161,6 +161,12 @@ class _LDSBase(Model):
     def is_stable(self):
         return np.max(np.abs(np.linalg.eigvals(self.dynamics_distn.A))) < 1.
 
+    @property
+    def has_missing_data(self):
+        m = [isinstance(s, LDSStatesMissingData) for s in self.states_list]
+        assert all(m) or (not any(m))
+        return all(m)
+
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
     def resample_model(self):
@@ -180,9 +186,13 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
             [s.strided_stateseq for s in self.states_list])
 
     def resample_emission_distn(self):
-        self.emission_distn.resample(
-            [np.hstack((s.stateseq,s.data)) for s in self.states_list])
-
+        xys = [np.hstack((s.stateseq, s.data)) for s in self.states_list]
+        # Provide a mask if necessary
+        if self.has_missing_data:
+            masks = [s.mask for s in self.states_list]
+            self.emission_distn.resample(data=xys, mask=masks)
+        else:
+            self.emission_distn.resample(data=xys)
 
 class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_coordinate_descent_step(self):
