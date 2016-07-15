@@ -6,7 +6,7 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from states import LDSStates
+from states import LDSStates, LDSStatesMissingData
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence
@@ -26,9 +26,13 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self,data,**kwargs):
+    def add_data(self,data,mask=None,**kwargs):
         assert isinstance(data,np.ndarray)
-        self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        if mask is None:
+            self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        else:
+            self.states_list.append(LDSStatesMissingData(model=self, data=data, mask=mask, **kwargs))
+
         return self
 
     def log_likelihood(self,data=None):
@@ -57,8 +61,8 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    def smooth(self, data):
-        self.add_data(data, generate=False)
+    def smooth(self, data, mask=None):
+        self.add_data(data, mask=mask, generate=False)
         s = self.states_list.pop()
         return s.smooth()
 
@@ -66,8 +70,8 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, states_noise=True, obs_noise=True):
-        self.add_data(data, generate=False)
+    def sample_predictions(self, data, Tpred, mask=None, states_noise=True, obs_noise=True):
+        self.add_data(data, mask=mask, generate=False)
         s = self.states_list.pop()
         return s.sample_predictions(Tpred, states_noise, obs_noise)
 
