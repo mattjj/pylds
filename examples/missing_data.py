@@ -14,7 +14,7 @@ npr.seed(0)
 #########################
 #  set some parameters  #
 #########################
-D_obs, D_latent = 1, 2
+D_obs, D_latent = 4, 2
 mu_init = np.array([0.,1.])
 sigma_init = 0.01*np.eye(2)
 
@@ -24,7 +24,7 @@ sigma_states = 0.01*np.eye(2)
 
 # C = np.array([[10.,0.]])
 C = np.random.randn(D_obs, D_latent)
-sigma_obs = 0.1*np.eye(D_obs)
+sigma_obs = 0.1 * np.eye(D_obs)
 
 
 ###################
@@ -43,10 +43,13 @@ data, stateseq = truemodel.generate(T)
 
 # Mask off a chunk of data
 mask = np.ones_like(data, dtype=bool)
-mask_start = 1000
-mask_stop = 1100
-mask_len = mask_stop - mask_start
-mask[mask_start:mask_stop] = False
+chunksz = 100
+for i,offset in enumerate(range(0,T,chunksz)):
+    j = i % (D_obs + 1)
+    if j < D_obs:
+        mask[offset:min(offset+chunksz, T), j] = False
+    if j == D_obs:
+        mask[offset:min(offset+chunksz, T), :] = False
 
 true_ll = truemodel.log_likelihood()
 
@@ -62,8 +65,8 @@ model = LDS(
     emission_distn=DiagonalRegression(D_obs, D_latent, alpha_0=2.0, beta_0=1.0))
 model.add_data(data=data, mask=mask)
 
-print("True LL: ", truemodel.log_likelihood(data, mask))
-print("Init LL: ", model.log_likelihood(data, mask))
+# print("True LL: ", truemodel.log_likelihood(data, mask))
+# print("Init LL: ", model.log_likelihood(data, mask))
 
 
 ###############
@@ -73,28 +76,29 @@ N_samples = 500
 sigma_obs_smpls = []
 def gibbs_update(model):
     model.resample_model()
-    sigma_obs_smpls.append(model.sigma_obs_flat[0])
+    sigma_obs_smpls.append(model.sigma_obs_flat)
     return model.log_likelihood()
 
 def em_update(model):
     model.EM_step()
-    sigma_obs_smpls.append(model.sigma_obs_flat[0])
+    sigma_obs_smpls.append(model.sigma_obs_flat)
     return model.log_likelihood()
 
 def meanfield_update(model):
     model.meanfield_coordinate_descent_step()
     sigma_obs_smpls.append(model.emission_distn.mf_beta / model.emission_distn.mf_alpha)
+    model.resample_from_mf()
     return model.log_likelihood()
 
 # Gibbs
 # lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
 
 # EM -- initialized with a few Gibbs iterations
-[model.resample_model() for _ in progprint_xrange(100)]
-lls = [em_update(model) for _ in progprint_xrange(N_samples)]
+# [model.resample_model() for _ in progprint_xrange(100)]
+# lls = [em_update(model) for _ in progprint_xrange(N_samples)]
 
 # Mean field
-# lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
+lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
 
 plt.figure()
 plt.plot(sigma_obs_smpls)
@@ -112,7 +116,7 @@ plt.ylabel('log likelihood')
 ################
 #  smoothing   #
 ################
-smoothed_obs = model.smooth(data, mask=mask)
+smoothed_obs = model.states_list[0].smooth()
 sample_predictive_obs = model.states_list[0].stateseq.dot(model.C.T)
 
 plt.figure()
@@ -120,16 +124,30 @@ given_data = data.copy()
 given_data[~mask] = np.nan
 masked_data = data.copy()
 masked_data[mask] = np.nan
+ylims = (-1.1*abs(data).max(), 1.1*abs(data).max())
+xlims = (0, min(T,1000))
 
-plt.plot(given_data, 'k', label="observed")
-plt.plot(masked_data, ':k', label="masked")
-plt.plot(smoothed_obs, 'b', label="smoothed")
-plt.plot(sample_predictive_obs, ':b', label="sample")
-plt.xlabel('time index')
-plt.ylabel('observation')
-plt.xlim([max(mask_start-mask_len, 0), min(mask_stop+mask_len, T)])
-plt.legend(loc="upper right")
+N_subplots = min(D_obs,4)
+for i in range(N_subplots):
+    plt.subplot(N_subplots,1,i+1,aspect="auto")
 
+    plt.plot(given_data[:,i], 'k', label="observed")
+    plt.plot(masked_data[:,i], ':k', label="masked")
+    plt.plot(smoothed_obs[:,i], 'b', lw=2, label="smoothed")
+    # plt.plot(sample_predictive_obs, ':b', label="sample")
+
+    plt.imshow(1-mask[:,i][None,:],cmap="Greys",alpha=0.25,extent=(0,T) + ylims, aspect="auto")
+
+    if i == 0:
+        plt.legend(loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.5))
+
+    if i == N_subplots - 1:
+        plt.xlabel('time index')
+
+    plt.ylabel("$x_%d(t)$" % (i+1))
+    plt.ylim(ylims)
+    plt.xlim(xlims)
+plt.savefig("missing_data_ex_lownoise.png")
 
 ################
 #  predicting  #

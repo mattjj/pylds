@@ -584,7 +584,8 @@ class LDSStatesMissingData(LDSStates):
             self.mu_init, self.sigma_init, self.mask * self.data)
 
     def smooth(self):
-        self.info_E_step()
+        if not hasattr(self, "smoothed_mus"):
+            self.info_E_step()
         return self.smoothed_mus.dot(self.C.T)
 
     def info_E_step(self):
