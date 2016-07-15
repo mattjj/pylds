@@ -228,6 +228,10 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
         vlb += self.dynamics_distn.get_vlb()
         return vlb
 
+    def resample_from_mf(self):
+        self.dynamics_distn.resample_from_mf()
+        self.emission_distn.resample_from_mf()
+
 
 class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):
     def meanfield_sgdstep(self, minibatch, prob, stepsize, **kwargs):
