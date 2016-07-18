@@ -45,19 +45,20 @@
 \maketitle
 \onehalfspacing
 
-The \emph{information form} of the Gaussian distribution is defined as,
+The \emph{information form} of the Gaussian distribution over~$x \in \reals^D$ is defined as,
 \begin{align}
   p(x \given J, h) 
   &=  \exp \left \{ -\frac{1}{2} x^\trans J x + h^\trans x - \log Z \right \},
 \end{align}
 where
 \begin{align}
-  \log Z = \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2}\log |J|.
+  \log Z = \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2}\log |J| + \frac{D}{2}\log 2 \pi.
 \end{align}
-The standard formulation is recovered by the transformations,  $\Sigma = J^{-1}$, and
-$\mu = J^{-1} h$. The advantage of working in the information form is that 
-it corresponds to the natural parameterization of the Gaussian distribution, and
-mean field variational inference is considerably easier with this form.
+The standard formulation is recovered by the
+transformations, $\Sigma = J^{-1}$, and $\mu = J^{-1} h$. When working
+with this natural parameterization, the parameters~$J$ and~$h$
+interact linearly with the data, making it considerably easier to
+derive mean field variational inference algorithms.
 
 In order to perform Kalman filtering and smoothing, we must be able to perform
 two operations: \emph{conditioning} and \emph{marginalization}. 
@@ -92,6 +93,10 @@ then,
         J_{xx} - J_{xy}J_{yy}^{-1} J_{xy}^\trans, \;
         h_x - J_{xy} J_{yy}^{-1} h_y)
 \end{align}
+Whereas in the standard formulation, marginalization is easy (simply extract
+sub-blocks of the mean and covariance) and conditioning involves solving a linear system; 
+in information form, condition is easy (simply add sufficient statistics) and 
+marginalization requires solving a linear system.
 
 \section*{Filtering, Sampling, and Smoothing}
 By interleaving these two steps we can filter, sample, and smooth the latent states
@@ -104,7 +109,7 @@ in a linear dynamical system. Take the model,
 In information form, the initial distribution is,
 \begin{align}
   % initi
-  x_1 &\sim \distNormal(J=Q_1^{-1}, h = Q_1^{-1} mu_1).
+  x_1 &\sim \distNormal(J=Q_1^{-1}, h = Q_1^{-1} \mu_1).
 \end{align}
 The dynamics are given by,
 \begin{align}
@@ -140,13 +145,12 @@ with
 \end{align}
 
 \subsection*{Filtering}
-We seek the conditional distribution,~$p(x_t \given y_{1:t})$, which 
-will be Gaussian. We begin with the initial distribution, 
-\begin{align}
-  p(x_1) &= \distNormal(x_1 \given J_{1 \given 0}, h_{1 \given 0}).
-\end{align}
-Assume, inductively, that~$x_t \given y_{1:t-1} \sim \distNormal(J_{t|t-1}, h_{t|t-1})$. Conditioning on the~$t$-th observation yields,
-Conditioned on the first observation,
+We seek the conditional distribution,~$p(x_t \given y_{1:t})$, which
+will be Gaussian.  Assume, inductively,
+that~$x_t \given y_{1:t-1} \sim \distNormal(J_{t|t-1},
+h_{t|t-1})$.
+Conditioning on the~$t$-th observation yields, Conditioned on the
+first observation,
 \begin{align}
   p(x_t \given y_{1:t}) &= \distNormal(x_t \given J_{t|t}, h_{t|t}), \\
   J_{t|t} &= J_{t|t-1} + J_{\sf obs} \\
@@ -157,8 +161,8 @@ Then, we predict the next latent state by writing the joint distribution of~$x_t
   p(x_{t+1} \given y_{1:t}) &= p(x_t \given y_{1:t}) \, p(x_{t+1} \given x_t) \\
   &= \distNormal(x_t \given J_{t+1|t}, h_{t+1|t}) \\
   J_{t+1|t} &= J_{22} - J_{21} (J_{t|t} + J_{11})^{-1}J_{21}^\trans \\
-  h_{t+1|t} &= h_2 - J_{21} (J_{t|t} + J_{11})^{-1} (h_{t|t} + h_1)
-\end{align}.
+  h_{t+1|t} &= h_2 - J_{21} (J_{t|t} + J_{11})^{-1} (h_{t|t} + h_1).
+\end{align}
 This completes one iteration and provides the input to the next. To start the recursion, we initialize,
 \begin{align}
   J_{1|0} = \Sigma_{\sf init}^{-1}, \quad
