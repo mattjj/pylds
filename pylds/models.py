@@ -61,10 +61,10 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, states_noise=True, obs_noise=True):
+    def sample_predictions(self, data, Tpred, inputs=None, states_noise=True, obs_noise=True):
         self.add_data(data, generate=False)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred, states_noise, obs_noise)
+        return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
 
     # convenience properties
 
@@ -211,6 +211,10 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
         self.emission_distn.meanfieldupdate(
             stats=(sum(s.E_emission_stats for s in self.states_list)))
 
+    def resample_from_mf(self):
+        self.dynamics_distn.resample_from_mf()
+        self.emission_distn.resample_from_mf()
+
     def vlb(self):
         vlb = 0.
         vlb += sum(s.get_vlb() for s in self.states_list)
@@ -340,19 +344,21 @@ class NonstationaryLDS(
 # TODO make data-dependent default constructors
 # TODO make a constructor that takes A, B, C, D
 
-from pybasicbayes.distributions import Regression, AutoRegression
+from pybasicbayes.distributions import Regression
 
 
-def DefaultLDS(n, p):
+def DefaultLDS(n, p, d=0):
     model = LDS(
-        dynamics_distn=AutoRegression(
-            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
+        dynamics_distn=Regression(
+            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n+d)), K_0=n*np.eye(n+d)),
         emission_distn=Regression(
-            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n)), K_0=p*np.eye(n)))
+            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n+d)), K_0=p*np.eye(n+d)))
 
     model.A = 0.99*np.eye(n)
+    model.B = 0.1 * np.random.randn(n,d)
     model.sigma_states = np.eye(n)
     model.C = np.random.randn(p, n)
+    model.D = np.random.randn(p, d)
     model.sigma_obs = 0.1*np.eye(p)
 
     return model

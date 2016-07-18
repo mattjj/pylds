@@ -433,7 +433,9 @@ cdef inline double condition_on(
         #              = L^{-1} (y - C * mu_x - D * u)
         dtrtrs('L', 'N', 'N', &p, &inc, &temp_pp[0,0], &p, &temp_p[0], &p, &info)
         # log likelihood = -1/2 * ||L^{-1} (y - C * mu_x - D * u)||*2
+        #                = -1/2 (y-yhat)^T (sigma_obs + C sigma_x C.T)^{-1} (y-yhat)
         ll = (-1./2) * dnrm2(&p, &temp_p[0], &inc)**2
+
         # Second solve with cholesky
         # temp_p = L.T^{-1} temp_p
         #        = S^{-1} (y - C * mu_x - D * u)
@@ -441,7 +443,7 @@ cdef inline double condition_on(
 
         # Compute the conditional mean
         # mu_cond = mu_x + temp_pn * temp_p
-        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x)
+        #         = mu_x + sigma_x * C.T * S^{-1} (y - C * mu_x - D * u)
         # Compare this to (18.31) of Murphy
         if (&mu_x[0] != &mu_cond[0]):
             dcopy(&n, &mu_x[0], &inc, &mu_cond[0], &inc)
