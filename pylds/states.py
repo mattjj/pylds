@@ -410,8 +410,9 @@ class LDSStates(object):
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
         if isdiag:
-            assert J_yy.ndim == 2
-            out -= 1./2 * np.sum(data**2 * np.diag(J_yy))
+            assert (J_yy.ndim == 1 and J_yy.shape[0] == data.shape[1]) or \
+                   (J_yy.shape == data.shape)
+            out -= 1./2 * np.sum(data**2 * J_yy)
         else:
             contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
             out -= 1./2 * np.einsum(contract, J_yy, data, data)
@@ -569,7 +570,7 @@ class LDSStatesMissingData(LDSStates):
         if self.diagonal_noise:
             # Use the fact that the diagonalregression prior is factorized
             _, _, E_sigmasq_inv, E_log_sigmasq = self.emission_distn.mf_expectations
-            J_yy = np.diag(E_sigmasq_inv)
+            J_yy = E_sigmasq_inv
             logdet_node = -np.sum(E_log_sigmasq)
 
         else:
