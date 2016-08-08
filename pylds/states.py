@@ -664,7 +664,6 @@ class LDSStatesMissingData(LDSStates):
         self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
 
         # Get the emission stats
-        # import ipdb; ipdb.set_trace()
         E_ysq = np.sum(data**2 * mask, axis=0)
         E_yxT = (data * mask).T.dot(smoothed_mus)
         E_xxT_vec = ExxT.reshape((T, n**2))
