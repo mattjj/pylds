@@ -52,7 +52,7 @@ class LDSStates(object):
         chol = np.linalg.cholesky(self.sigma_states)
         randseq = np.random.randn(T-1,n).dot(chol.T)
 
-        for t in xrange(1,T):
+        for t in range(1,T):
             stateseq[t] = self.A.dot(stateseq[t-1]) + randseq[t-1]
 
         return stateseq
@@ -73,7 +73,7 @@ class LDSStates(object):
 
         states = np.empty((Tpred, self.n))
         states[0] = np.random.multivariate_normal(init_mu, init_sigma)
-        for t in xrange(1,Tpred):
+        for t in range(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + randseq[t-1]
 
         obs = states.dot(self.C.T)
@@ -159,7 +159,6 @@ class LDSStates(object):
         def is_symmetric(A):
             return np.allclose(A,A.T)
 
-        assert is_symmetric(ExxT)
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)
 
@@ -511,7 +510,6 @@ class LDSStatesMissingData(LDSStates):
         self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
 
         # Get the emission stats
-        # import ipdb; ipdb.set_trace()
         E_ysq = np.sum(data**2 * mask, axis=0)
         E_yxT = (data * mask).T.dot(smoothed_mus)
         E_xxT_vec = ExxT.reshape((T, n**2))
