@@ -4,7 +4,7 @@ import numpy as np
 from pybasicbayes.util.general import AR_striding
 from pybasicbayes.util.stats import mniw_expectedstats
 
-from lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
+from pylds.lds_messages_interface import kalman_filter, filter_and_sample, E_step, \
     info_E_step, filter_and_sample_diagonal, kalman_filter_diagonal
 
 

@@ -6,7 +6,7 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from states import LDSStates
+from pylds.states import LDSStates
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence

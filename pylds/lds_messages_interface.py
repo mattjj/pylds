@@ -7,7 +7,7 @@ from functools import wraps, partial
 #  distribution-form wrappers  #
 ################################
 
-from lds_messages import \
+from pylds.lds_messages import \
     kalman_filter as _kalman_filter, \
     rts_smoother as _rts_smoother, \
     filter_and_sample as _filter_and_sample, \
@@ -75,7 +75,7 @@ filter_and_sample_randomwalk = _wrap(_filter_and_sample_randomwalk,_argcheck_ran
 #  information-form wrappers  #
 ###############################
 
-from lds_info_messages import \
+from pylds.lds_info_messages import \
     kalman_info_filter as _kalman_info_filter, \
     info_E_step as _info_E_step, \
     info_sample as _info_sample
