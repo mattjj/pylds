@@ -86,7 +86,7 @@ def generate_data(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, T):
     emissionrandseq = randn(T,p)
 
     x[0] = np.random.multivariate_normal(mu_init,sigma_init)
-    for t in xrange(T):
+    for t in range(T):
         x[t+1] = A.dot(x[t]) + B.dot(u[t]) + Ldyn.dot(staterandseq[t])
         out[t] = C.dot(x[t]) + D.dot(u[t]) + Lobs.dot(emissionrandseq[t])
 
@@ -185,7 +185,7 @@ def check_info_predict(J,h,J11,J21,J22,h1,h2):
 
 
 def test_info_predict():
-    for _ in xrange(5):
+    for _ in range(5):
         n = randint(1,20)
         J = rand_psd(n)
         h = randn(n)
@@ -240,7 +240,7 @@ def check_filters(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, data
 
 
 def test_info_filter():
-    for _ in xrange(1):
+    for _ in range(1):
         n, p, d, T = randint(1,5), randint(1,5), 1, randint(10,20)
         model = generate_model(n,p,d)
         data, inputs = generate_data(*(model + (T,)))
@@ -264,7 +264,7 @@ def check_info_Estep(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, i
 
 
 def test_info_Estep():
-    for _ in xrange(5):
+    for _ in range(5):
         n, p, d, T = randint(1, 5), randint(1, 5), 1, randint(10, 20)
         model = generate_model(n, p, d)
         data, inputs = generate_data(*(model + (T,)))
@@ -296,7 +296,7 @@ def check_extra_loglike_terms(A, B, sigma_states, C, D, sigma_obs, mu_init, sigm
 
 
 def test_extra_loglike():
-    for _ in xrange(5):
+    for _ in range(5):
         n, p, d, T = randint(1,5), randint(1,5), randint(0,3), randint(10,20)
         model = generate_model(n, p, d)
         data, inputs = generate_data(*(model + (T,)))

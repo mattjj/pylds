@@ -39,14 +39,15 @@ def _argcheck(mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, 
     return mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data
 
 
-def _argcheck_diag_sigma_obs(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
+def _argcheck_diag_sigma_obs(mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data):
     T = data.shape[0]
-    A, sigma_states, C = \
+    A, B, sigma_states, C, D, = \
         map(partial(_ensure_ndim, T=T, ndim=3),
-            [A, sigma_states, C])
+            [A, B, sigma_states, C, D])
     sigma_obs = _ensure_ndim(sigma_obs, T=T, ndim=2)
+    inputs = np.require(inputs, dtype=np.float64, requirements='C')
     data = np.require(data, dtype=np.float64, requirements='C')
-    return mu_init, sigma_init, A, sigma_states, C, sigma_obs, data
+    return mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data
 
 
 def _argcheck_randomwalk(mu_init, sigma_init, sigmasq_states, sigmasq_obs, data):

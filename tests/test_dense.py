@@ -71,7 +71,8 @@ def lds_to_dense_infoparams(model,data,inputs):
 #  tests  #
 ###########
 
-def same_means(model,(J,h)):
+def same_means(model, Jh):
+    J,h = Jh
     n, T = model.n, model.states_list[0].T
 
     dense_mu = np.linalg.solve(J,h).reshape((T,n))
@@ -82,7 +83,8 @@ def same_means(model,(J,h)):
     assert np.allclose(dense_mu,model_mu)
 
 
-def same_marginal_covs(model,(J,h)):
+def same_marginal_covs(model, Jh):
+    J, h = Jh
     n, T = model.n, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)
@@ -95,7 +97,8 @@ def same_marginal_covs(model,(J,h)):
     assert np.allclose(dense_sigmas,model_sigmas)
 
 
-def same_pairwise_secondmoments(model,(J,h)):
+def same_pairwise_secondmoments(model, Jh):
+    J, h = Jh
     n, T = model.n, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)

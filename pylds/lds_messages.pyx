@@ -114,6 +114,7 @@ def rts_smoother(
             temp_nn)
 
     # run rts update backwards, using predictions
+    # TODO: Doesn't this need B?
     for t in range(T-2,-1,-1):
         rts_backward_step(
             A[t], sigma_states[t],

@@ -53,7 +53,7 @@ class LDSStates(object):
         chol = np.linalg.cholesky(self.sigma_states)
         randseq = np.random.randn(T-1,n).dot(chol.T)
 
-        for t in xrange(1,T):
+        for t in range(1,T):
             stateseq[t] = self.A.dot(stateseq[t-1]) + \
                           self.B.dot(self.inputs[t-1]) + \
                           randseq[t-1]
@@ -79,7 +79,7 @@ class LDSStates(object):
 
         states = np.empty((Tpred, self.n))
         states[0] = np.random.multivariate_normal(init_mu, init_sigma)
-        for t in xrange(1,Tpred):
+        for t in range(1,Tpred):
             states[t] = self.A.dot(states[t-1]) + \
                         self.B.dot(inputs[t-1]) + \
                         randseq[t-1]
@@ -111,17 +111,17 @@ class LDSStates(object):
         # Use the info E step because it can take advantage of diagonal noise
         # The standard E step could but we have not implemented it
         self.info_E_step()
-        return self.smoothed_mus.dot(self.C.T)
+        return self.smoothed_mus.dot(self.C.T) + self.inputs.dot(self.D.T)
 
     ### resampling
 
     def resample(self):
         if self.diagonal_noise:
-            raise NotImplementedError  # TODO need to make this work with inputs
-            # self._normalizer, self.stateseq = filter_and_sample_diagonal(
-            #     self.mu_init, self.sigma_init,
-            #     self.A, self.sigma_states, self.C, self.sigma_obs_flat,
-            #     self.data)
+            self._normalizer, self.stateseq = filter_and_sample_diagonal(
+                self.mu_init, self.sigma_init,
+                self.A, self.B, self.sigma_states,
+                self.C, self.D, self.sigma_obs_flat,
+                self.inputs, self.data)
         else:
             self._normalizer, self.stateseq = filter_and_sample(
                 self.mu_init, self.sigma_init,
@@ -334,6 +334,10 @@ class LDSStates(object):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
+        def get_params(distn):
+            return mniw_expectedstats(
+                *distn._natural_to_standard(distn.mf_natural_hypparam))
+
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             get_params(self.dynamics_distn)
 
@@ -344,6 +348,7 @@ class LDSStates(object):
         E_BT_Qinv = J_pair_21[:,self.n:].T
         E_BT_Qinv_A = E_BT_Qinv.dot(np.linalg.solve(E_Qinv, E_AT_Qinv.T))
         E_AT_Qinv_A = J_pair_11[:self.n, :self.n].copy("C")
+
         h_pair_1 = -self.inputs.dot(E_BT_Qinv_A)
         h_pair_2 = self.inputs.dot(E_BT_Qinv)
 

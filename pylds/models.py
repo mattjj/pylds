@@ -59,8 +59,8 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    def smooth(self, data):
-        self.add_data(data, generate=False)
+    def smooth(self, data, inputs=None):
+        self.add_data(data, inputs=inputs, generate=False)
         s = self.states_list.pop()
         return s.smooth()
 

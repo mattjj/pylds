@@ -28,7 +28,7 @@ def generate_data(sigmasq_states, sigmasq_obs, mu_init, sigmasq_init, T):
     emissionrandseq = randn(T,n)
 
     x[0] = mu_init + np.sqrt(sigmasq_init)*randn(n)
-    for t in xrange(T):
+    for t in range(T):
         x[t+1] = x[t] + np.sqrt(sigmasq_states)*staterandseq[t]
         out[t] = x[t] + np.sqrt(sigmasq_obs)*emissionrandseq[t]
 
@@ -70,7 +70,7 @@ def check_sample(sigmasq_states, sigmasq_obs, mu_init, sigmasq_init, data):
 ##################################
 
 def test_filter_and_sample():
-    for _ in xrange(5):
+    for _ in range(5):
         n, T = randint(1,10), randint(10,50)
         model = generate_model(n)
         data = generate_data(*(model + (T,)))

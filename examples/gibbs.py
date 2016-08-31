@@ -28,9 +28,9 @@ A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
 B = np.ones((n,d))
 sigma_states = 0.01*np.eye(2)
 
-C = np.array([[10.,0.]])
+C = np.array([[5.,0.]])
 D = np.zeros((p,d))
-sigma_obs = 0.01*np.eye(1)
+sigma_obs = np.eye(1)
 
 ###################
 #  generate data  #
@@ -42,6 +42,7 @@ truemodel = LDS(
 
 inputs = np.random.randn(T,d)
 data, stateseq = truemodel.generate(T, inputs=inputs)
+smooth_data = stateseq.dot(C.T) + inputs.dot(D.T)
 
 ###############
 # test models #
@@ -86,14 +87,15 @@ plt.ylabel('log likelihood')
 ################
 #  smoothing   #
 ################
-input_model.E_step()
-smoothed_states = input_model.states_list[0].smoothed_mus
+input_xs = input_model.smooth(data, inputs)
+noinput_xs = noinput_model.smooth(data)
 
 plt.figure()
-plt.plot(stateseq[:,0], '-b')
-plt.plot(smoothed_states[:,0],'-r')
-plt.show()
-
+plt.plot(smooth_data, 'b-', label="true")
+plt.plot(input_xs, 'r--', label="with input")
+plt.plot(noinput_xs, 'g--', label="wo input")
+plt.xlabel("Time")
+plt.ylabel("Smoothed Data")
 
 ################
 #  predicting  #

@@ -57,7 +57,7 @@ def check_diagonal_plus_lowrank(a,B,C,b):
 
 
 def test_cython_diagonal_plus_lowrank():
-    for _ in xrange(5):
+    for _ in range(5):
         n, p, k = randint(1,10), randint(1,10), randint(1,10)
         a = rand(p)
         B = randn(p,n)
@@ -98,7 +98,7 @@ def check_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
 
 
 def test_cython_condition_on_diagonal():
-    for _ in xrange(5):
+    for _ in range(5):
         n, p = randint(1,10), randint(1,10)
         mu_x = randn(n)
         sigma_x = rand_psd(n)
@@ -124,7 +124,7 @@ def check_filter_and_sample(A, B, C, d, mu_init, sigma_init, data):
 
 
 def test_filter_and_sample():
-    for _ in xrange(5):
+    for _ in range(5):
         n, p, T = randint(1,5), randint(1,5), randint(10,20)
         model = generate_diag_model(n,p)
         data = generate_data(*(model + (T,)))
