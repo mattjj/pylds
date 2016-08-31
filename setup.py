@@ -66,7 +66,7 @@ setup(
     packages=['pylds'],
     install_requires=[
         'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib', 'pybasicbayes'],
-    ext_modules=cythonize('pylds/**/*.pyx'),
+    ext_modules=ext_modules,
     classifiers=[
         'Intended Audience :: Science/Research',
         'Programming Language :: Python',
