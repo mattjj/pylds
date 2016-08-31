@@ -117,15 +117,17 @@ class LDSStates(object):
 
     def resample(self):
         if self.diagonal_noise:
-            self._normalizer, self.stateseq = filter_and_sample_diagonal(
-                self.mu_init, self.sigma_init,
-                self.A, self.sigma_states, self.C, self.sigma_obs_flat,
-                self.data)
+            raise NotImplementedError  # TODO need to make this work with inputs
+            # self._normalizer, self.stateseq = filter_and_sample_diagonal(
+            #     self.mu_init, self.sigma_init,
+            #     self.A, self.sigma_states, self.C, self.sigma_obs_flat,
+            #     self.data)
         else:
             self._normalizer, self.stateseq = filter_and_sample(
                 self.mu_init, self.sigma_init,
-                self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.data)
+                self.A, self.B, self.sigma_states,
+                self.C, self.D, self.sigma_obs,
+                self.inputs, self.data)
 
     ### EM
 
