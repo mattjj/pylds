@@ -27,6 +27,7 @@ from util cimport copy_transpose, copy_upper_lower
 def kalman_info_filter(
     double[:,:] J_init, double[:] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
+    double[:,:] h_pair_1, double[:,:] h_pair_2,
     double[:,:,:] J_node, double[:,:] h_node):
 
     # allocate temporaries and internals
@@ -51,7 +52,9 @@ def kalman_info_filter(
             J_predict, h_predict, J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
-            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            filtered_Js[t], filtered_hs[t],
+            J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            h_pair_1[t], h_pair_2[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
     info_condition_on(
@@ -66,6 +69,7 @@ def kalman_info_filter(
 def info_E_step(
     double[:,::1] J_init, double[::1] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
+    double[:,:] h_pair_1, double[:,:] h_pair_2,
     double[:,:,:] J_node, double[:,:] h_node):
 
     # allocate temporaries and internals
@@ -95,7 +99,9 @@ def info_E_step(
             predict_Js[t], predict_hs[t], J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
-            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            filtered_Js[t], filtered_hs[t],
+            J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            h_pair_1[t], h_pair_2[t],
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
     info_condition_on(
@@ -112,6 +118,7 @@ def info_E_step(
     for t in range(T-2,-1,-1):
         info_rts_backward_step(
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            h_pair_1[t], h_pair_2[t],
             predict_Js[t+1], filtered_Js[t], filtered_Js[t+1],  # filtered_Js[t] is mutated
             predict_hs[t+1], filtered_hs[t], filtered_hs[t+1],  # filtered_hs[t] is mutated
             smoothed_mus[t], smoothed_mus[t+1], smoothed_sigmas[t], ExnxT[t],
@@ -124,6 +131,7 @@ def info_E_step(
 def info_sample(
     double[:,::1] J_init, double[::1] h_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
+    double[:,:] h_pair_1, double[:,:] h_pair_2,
     double[:,:,:] J_node, double[:,:] h_node):
 
     cdef int T = J_node.shape[0], n = J_node.shape[1]
@@ -144,7 +152,7 @@ def info_sample(
 
     # dgemv requires these things
     cdef int inc = 1
-    cdef double neg1 = -1., zero = 0.
+    cdef double neg1 = -1., one = 1., zero = 0.
 
     # run filter forwards
     predict_Js[0,:,:] = J_init
@@ -154,7 +162,9 @@ def info_sample(
             predict_Js[t], predict_hs[t], J_node[t], h_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
-            filtered_Js[t], filtered_hs[t], J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            filtered_Js[t], filtered_hs[t],
+            J_pair_11[t], J_pair_21[t], J_pair_22[t],
+            h_pair_1[t], h_pair_2[t],
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
     info_condition_on(
@@ -166,9 +176,12 @@ def info_sample(
     # sample backward
     info_sample_gaussian(filtered_Js[T-1], filtered_hs[T-1], randseq[T-1])
     for t in range(T-2,-1,-1):
+        # temp_n = h_1 - J_12^T x_{t+1}
         # J_pair_21 is C-major, so it is actually J12 to blas!
+        dcopy(&n, &h_pair_1[t,0], &inc, &temp_n[0], &inc)
         dgemv('N', &n, &n, &neg1, &J_pair_21[t,0,0], &n, &randseq[t+1,0],
-              &inc, &zero, &temp_n[0], &inc)
+              &inc, &one, &temp_n[0], &inc)
+
         info_condition_on(
             filtered_Js[t], filtered_hs[t], J_pair_11[t], temp_n,
             filtered_Js[t], filtered_hs[t])
@@ -198,7 +211,9 @@ cdef inline void info_condition_on(
 
 
 cdef inline double info_predict(
-    double[:,:] J, double[:] h, double[:,:] J11, double[:,:] J21, double[:,:] J22,
+    double[:,:] J, double[:] h,
+    double[:,:] J11, double[:,:] J21, double[:,:] J22,
+    double[:] h1, double[:] h2,
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
     ) nogil:
@@ -211,18 +226,30 @@ cdef inline double info_predict(
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1., lognorm = 0.
 
+    # Copy J to temp_nn and add J_11
     dcopy(&nn, &J[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &one, &J11[0,0], &inc, &temp_nn[0,0], &inc)
-    dcopy(&nn, &J22[0,0], &inc, &Jpredict[0,0], &inc)
-    dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
+
+    # Copy h to temp_n and add h_1
     dcopy(&n, &h[0], &inc, &temp_n[0], &inc)
+    daxpy(&n, &one, &h1[0], &inc, &temp_n[0], &inc)
+
+    # Initialize J_predict to J_22, h_predict to h_2, and temp_nn2 with J_21
+    dcopy(&nn, &J22[0,0], &inc, &Jpredict[0,0], &inc)
+    dcopy(&n, &h2[0], &inc, &hpredict[0], &inc)
+    dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
 
     lognorm += info_lognorm_destructive(temp_nn, temp_n)  # mutates temp_n and temp_nn
+    # Now temp_nn = chol(J+J11), temp_n = chol(J+J11)^{-1} (h+h1)
+    # Solve again so that temp_n = (J+J11)^{-1} (h+h1)
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+    # Finally, subtract J21 (J+J11)^{-1} (h+h1)
     # NOTE: transpose because J21 is in C-major order
-    dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &zero, &hpredict[0], &inc)
+    dgemv('T', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hpredict[0], &inc)
 
+    # Solve again to get temp_nn2 = (J+J11)^{-1}J_12
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
+    # Finally, subtract to get Jp = J22 - J21 (Jf+J11)^{-1} J21
     # TODO this call aliases pointers, should really call dsyrk and copy lower to upper
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
     # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
@@ -264,6 +291,7 @@ cdef inline double info_lognorm(
 
 cdef inline void info_rts_backward_step(
     double[:,:] J11, double[:,:] J21, double[:,:] J22,
+    double[:] h1, double[:] h2,
     double[:,:] Jpred_tp1, double[:,:] Jfilt_t, double[:,:] Jsmooth_tp1,  # Jfilt_t is mutated!
     double[:] hpred_tp1, double[:] hfilt_t, double[:] hsmooth_tp1,  # hfilt_t is mutated!
     double[:] mu_t, double[:] mu_tp1, double[:,:] sigma_t, double[:,:] ExnxT,
@@ -280,23 +308,45 @@ cdef inline void info_rts_backward_step(
     cdef int inc = 1, info = 0
     cdef double one = 1., zero = 0., neg1 = -1.
 
+    # temp_nn = Jsmooth_tp1 - J_pred_tp1 + J22
     dcopy(&nn, &Jsmooth_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &neg1, &Jpred_tp1[0,0], &inc, &temp_nn[0,0], &inc)
     daxpy(&nn, &one, &J22[0,0], &inc, &temp_nn[0,0], &inc)
+
+    # temp_nn2 = J_12.T (recall C order)
     copy_transpose(n, n, &J21[0,0], &temp_nn2[0,0])
 
+    # temp_nn2 = temp_nn^{-1} temp_nn2
+    #          = (Jsmooth_tp1 - J_pred_tp1 + J22)^{-1/2} J_12.T
     dpotrf('L', &n, &temp_nn[0,0], &n, &info)
     dtrtrs('L', 'N', 'N', &n, &n, &temp_nn[0,0], &n, &temp_nn2[0,0], &n, &info)
+
+    # Jfilt_t = J_filt_t + J11
     daxpy(&nn, &one, &J11[0,0], &inc, &Jfilt_t[0,0], &inc)
+
+    # J_filt_t = J_filt_t + J11 - J_12 (J_smooth - J_pred_tp1 + J_22)^{-1} J_12.T
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jfilt_t[0,0], &n)
 
+
+    # hfilt_t = h_filt_t + h1
+    daxpy(&n, &one, &h1[0], &inc, &hfilt_t[0], &inc)
+
+    # temp_n = h_smooth_tp1 - h_pred_tp1 + h2
     dcopy(&n, &hsmooth_tp1[0], &inc, &temp_n[0], &inc)
     daxpy(&n, &neg1, &hpred_tp1[0], &inc, &temp_n[0], &inc)
+    daxpy(&n, &one, &h2[0], &inc, &temp_n[0], &inc)
+
+    # temp_n = (Jsmooth_tp1 - J_pred_tp1 + J22)^{-1} (h_smooth_tp1 - h_pred_tp1 + h2)
     dpotrs('L', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
+
+    # h_filt_t = h_filt_t + h1 - J_12.T (Jsmooth_tp1 - J_pred_tp1 + J22)^{-1} (h_smooth_tp1 - h_pred_tp1 + h2)
     dgemv('N', &n, &n, &neg1, &J21[0,0], &n, &temp_n[0], &inc, &one, &hfilt_t[0], &inc)
 
+    # Convert to distribution form
     info_to_distn(Jfilt_t, hfilt_t, mu_t, sigma_t)
 
+    # TODO: Check if this needs updating
+    # Compute expected sufficient statistics
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &ExnxT[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &ExnxT[0,0], &n, &info)
     dger(&n, &n, &one, &mu_tp1[0], &inc, &mu_t[0], &inc, &ExnxT[0,0], &n)
@@ -335,9 +385,9 @@ cdef inline void info_sample_gaussian(
 #  test bindings  #
 ###################
 
-def info_predict_test(J,h,J11,J21,J22,Jpredict,hpredict):
+def info_predict_test(J,h,J11,J21,J22,h1,h2,Jpredict,hpredict):
     temp_n = np.random.randn(*h.shape)
     temp_nn = np.random.randn(*J.shape)
     temp_nn2 = np.random.randn(*J.shape)
 
-    return info_predict(J,h,J11,J21,J22,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
+    return info_predict(J,h,J11,J21,J22,h1,h2,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)

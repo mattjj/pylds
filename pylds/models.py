@@ -26,32 +26,34 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self,data,**kwargs):
+    def add_data(self, data, inputs=None, **kwargs):
         assert isinstance(data,np.ndarray)
-        self.states_list.append(LDSStates(model=self,data=data,**kwargs))
+        self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
         return self
 
-    def log_likelihood(self,data=None):
+    def log_likelihood(self,data=None, inputs=None):
         if data is not None:
             assert isinstance(data,(list,np.ndarray))
             if isinstance(data,np.ndarray):
-                self.add_data(data=data,generate=False)
+                self.add_data(data=data, inputs=inputs, generate=False)
                 return self.states_list.pop().log_likelihood()
             else:
-                return sum(self.log_likelihood(d) for d in data)
+                return sum(self.log_likelihood(d, i) for (d, i) in zip(data, inputs))
         else:
             return sum(s.log_likelihood() for s in self.states_list)
 
-    def generate(self,T,keep=True):
-        s = LDSStates(model=self,T=T,initialize_from_prior=True)
-        data = self._generate_obs(s)
+    def generate(self, T, inputs=None, keep=True):
+        s = LDSStates(model=self, T=T, inputs=inputs, initialize_from_prior=True)
+        data = self._generate_obs(s, inputs)
         if keep:
             self.states_list.append(s)
         return data, s.stateseq
 
-    def _generate_obs(self,s):
+    def _generate_obs(self,s, inputs):
         if s.data is None:
-            s.data = self.emission_distn.rvs(x=s.stateseq,return_xy=False)
+            inputs = np.zeros((s.T, 0)) if inputs is None else inputs
+            s.data = self.emission_distn.rvs(
+                x=np.hstack((s.stateseq, inputs)), return_xy=False)
         else:
             # filling in missing data
             raise NotImplementedError
@@ -66,22 +68,27 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, states_noise=True, obs_noise=True):
+    def sample_predictions(self, data, Tpred, inputs=None, states_noise=True, obs_noise=True):
         self.add_data(data, generate=False)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred, states_noise, obs_noise)
+        return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
 
     # convenience properties
 
     @property
     def n(self):
         'latent dimension'
-        return self.emission_distn.D_in
+        return self.dynamics_distn.D_out
 
     @property
     def p(self):
         'emission dimension'
         return self.emission_distn.D_out
+
+    @property
+    def d(self):
+        'input dimension'
+        return self.dynamics_distn.D_in - self.dynamics_distn.D_out
 
     @property
     def mu_init(self):
@@ -111,11 +118,19 @@ class _LDSBase(Model):
 
     @property
     def A(self):
-        return self.dynamics_distn.A
+        return self.dynamics_distn.A[:,:self.n].copy("C")
 
     @A.setter
     def A(self,A):
-        self.dynamics_distn.A = A
+        self.dynamics_distn.A[:,:self.n] = A
+
+    @property
+    def B(self):
+        return self.dynamics_distn.A[:, self.n:].copy("C")
+
+    @B.setter
+    def B(self, B):
+        self.dynamics_distn.A[:, self.n:] = B
 
     @property
     def sigma_states(self):
@@ -127,11 +142,19 @@ class _LDSBase(Model):
 
     @property
     def C(self):
-        return self.emission_distn.A
+        return self.emission_distn.A[:,:self.n].copy("C")
 
     @C.setter
     def C(self,C):
-        self.emission_distn.A = C
+        self.emission_distn.A[:,:self.n] = C
+
+    @property
+    def D(self):
+        return self.emission_distn.A[:, self.n:].copy("C")
+
+    @D.setter
+    def D(self, D):
+        self.emission_distn.A[:, self.n:] = D
 
     @property
     def sigma_obs(self):
@@ -173,11 +196,11 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
     def resample_dynamics_distn(self):
         self.dynamics_distn.resample(
-            [s.strided_stateseq for s in self.states_list])
+            [np.hstack((s.stateseq[:-1],s.inputs[:-1],s.stateseq[1:])) for s in self.states_list])
 
     def resample_emission_distn(self):
         self.emission_distn.resample(
-            [np.hstack((s.stateseq,s.data)) for s in self.states_list])
+            [np.hstack((s.stateseq,s.inputs,s.data)) for s in self.states_list])
 
 
 class _LDSMeanField(_LDSBase, ModelMeanField):
@@ -206,6 +229,10 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_update_emission_distn(self):
         self.emission_distn.meanfieldupdate(
             stats=(sum(s.E_emission_stats for s in self.states_list)))
+
+    def resample_from_mf(self):
+        self.dynamics_distn.resample_from_mf()
+        self.emission_distn.resample_from_mf()
 
     def vlb(self):
         vlb = 0.
@@ -336,19 +363,21 @@ class NonstationaryLDS(
 # TODO make data-dependent default constructors
 # TODO make a constructor that takes A, B, C, D
 
-from pybasicbayes.distributions import Regression, AutoRegression
+from pybasicbayes.distributions import Regression
 
 
-def DefaultLDS(n, p):
+def DefaultLDS(n, p, d=0):
     model = LDS(
-        dynamics_distn=AutoRegression(
-            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
+        dynamics_distn=Regression(
+            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n+d)), K_0=n*np.eye(n+d)),
         emission_distn=Regression(
-            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n)), K_0=p*np.eye(n)))
+            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n+d)), K_0=p*np.eye(n+d)))
 
     model.A = 0.99*np.eye(n)
+    model.B = 0.1 * np.random.randn(n,d)
     model.sigma_states = np.eye(n)
     model.C = np.random.randn(p, n)
+    model.D = np.random.randn(p, d)
     model.sigma_obs = 0.1*np.eye(p)
 
     return model

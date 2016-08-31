@@ -27,13 +27,16 @@ def _ensure_ndim(X,T,ndim):
         return as_strided(X, shape=(T,)+X.shape, strides=(0,)+X.strides)
 
 
-def _argcheck(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
+def _argcheck(mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data):
     T = data.shape[0]
-    A, sigma_states, C, sigma_obs = \
+    A, B, sigma_states, C, D, sigma_obs = \
         map(partial(_ensure_ndim, T=T, ndim=3),
-            [A, sigma_states, C, sigma_obs])
+            [A, B, sigma_states, C, D, sigma_obs])
+    # Check that the inputs are C ordered and at least 1d
+    inputs = np.require(inputs, dtype=np.float64, requirements='C')
+
     data = np.require(data, dtype=np.float64, requirements='C')
-    return mu_init, sigma_init, A, sigma_states, C, sigma_obs, data
+    return mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data
 
 
 def _argcheck_diag_sigma_obs(mu_init, sigma_init, A, sigma_states, C, sigma_obs, data):
@@ -81,13 +84,16 @@ from pylds.lds_info_messages import \
     info_sample as _info_sample
 
 
-def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node):
+def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node):
     T = h_node.shape[0]
     J_pair_11, J_pair_21, J_pair_22, J_node = \
         map(partial(_ensure_ndim, T=T, ndim=3),
             [J_pair_11, J_pair_21, J_pair_22, J_node])
+    h_pair_1, h_pair_2 = \
+        map(partial(_ensure_ndim, T=T, ndim=2),
+            [h_pair_1, h_pair_2])
     h_node = np.require(h_node, dtype=np.float64, requirements='C')
-    return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
+    return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node
 
 
 kalman_info_filter = _wrap(_kalman_info_filter, _info_argcheck)
