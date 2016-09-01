@@ -10,8 +10,6 @@ from pylds.models import LDS
 
 npr.seed(0)
 
-from pybasicbayes.util.profiling import show_line_stats
-
 #########################
 #  set some parameters  #
 #########################
@@ -114,15 +112,15 @@ def svi_update(model, stepsize, minibatchsize):
 # lls = [em_update(model) for _ in progprint_xrange(N_samples)]
 
 ## Mean field
-# lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
+lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
 
 ## SVI
-delay = 10.0
-forgetting_rate = 0.5
-stepsizes = (np.arange(N_samples) + delay)**(-forgetting_rate)
-minibatchsize = 500
-# [model.resample_model() for _ in progprint_xrange(100)]
-lls = [svi_update(model, stepsizes[itr], minibatchsize) for itr in progprint_xrange(N_samples)]
+# delay = 10.0
+# forgetting_rate = 0.5
+# stepsizes = (np.arange(N_samples) + delay)**(-forgetting_rate)
+# minibatchsize = 500
+# # [model.resample_model() for _ in progprint_xrange(100)]
+# lls = [svi_update(model, stepsizes[itr], minibatchsize) for itr in progprint_xrange(N_samples)]
 
 
 ################

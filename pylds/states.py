@@ -281,6 +281,9 @@ class LDSStates(object):
         J_pair_21 = -np.linalg.solve(sigma_states, A)
         J_pair_22 = np.linalg.inv(sigma_states)
 
+        h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
+        h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
+
         # Check if diagonal and avoid inverting D_obs x D_obs matrix
         if self.diagonal_noise:
             J_node = (C.T * 1./ self.sigma_obs_flat).dot(C)
@@ -289,15 +292,13 @@ class LDSStates(object):
             J_node = C.T.dot(np.linalg.solve(sigma_obs, C))
             h_node = np.einsum('ik,ij,tj->tk', C, np.linalg.inv(sigma_obs), data)
 
-        h_pair_1 = inputs.dot(B.T).dot(J_pair_21)
-        h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
-
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(
-                J_init,h_init,
-            J_pair_11,J_pair_21,J_pair_22,
-            h_pair_1,h_pair_2,
-            J_node,h_node)
+                J_init, h_init,
+                J_pair_11, J_pair_21, J_pair_22,
+                h_pair_1, h_pair_2,
+                J_node, h_node)
+
         self._normalizer += self._extra_loglike_terms(
             self.A, self.B, self.sigma_states,
             self.C, self.D, self.sigma_obs,
@@ -348,12 +349,8 @@ class LDSStates(object):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
-        def get_params(distn):
-            return mniw_expectedstats(
-                *distn._natural_to_standard(distn.mf_natural_hypparam))
-
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
-            get_params(self.dynamics_distn)
+            self.dynamics_distn.meanfield_expectedstats()
 
         # TODO: Check the logic behind these expectations.
         # Do we need to worry about correlations between A,B in E_BT_Qinv_A, for example?
@@ -366,7 +363,8 @@ class LDSStates(object):
         h_pair_1 = -self.inputs.dot(E_BT_Qinv_A)
         h_pair_2 = self.inputs.dot(E_BT_Qinv)
 
-        J_yy, J_yx, J_node, logdet_node = get_params(self.emission_distn)
+        J_yy, J_yx, J_node, logdet_node = \
+            self.emission_distn.meanfield_expectedstats()
         E_Rinv = J_yy
         E_Rinv_C = J_yx[:,:self.n].copy("C")
         E_Rinv_D = J_yx[:,self.n:].copy("C")
@@ -521,19 +519,20 @@ class LDSStatesMissingData(LDSStates):
         J_pair_21 = -np.linalg.solve(self.sigma_states, self.A)
         J_pair_22 = np.linalg.inv(self.sigma_states)
 
+        # Check if diagonal and avoid inverting D_obs x D_obs matrix
+        h_pair_1 = self.inputs.dot(self.B.T).dot(J_pair_21)
+        h_pair_2 = self.inputs.dot(np.linalg.solve(self.sigma_states, self.B).T)
+
         if self.diagonal_noise:
             Jobs = self.mask / self.sigma_obs_flat
             CCT = np.array([np.outer(cp,cp) for cp in self.C])
             CCT_vec = np.reshape(CCT, (self.p,self.n**2))
             J_node = (np.dot(Jobs, CCT_vec)).reshape((self.T, self.n, self.n))
-            # J_node2 = np.einsum('ji,tj,jk->tik', self.C, self.mask / self.sigma_obs_flat, self.C)
-            # assert np.allclose(J_node, J_node2)
             h_node = (self.data * Jobs).dot(self.C)
         else:
-            raise NotImplementedError("Only supporting diagonal regression class right now")
+            raise NotImplementedError("Only supporting diagonal observations for missing data")
 
-        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, \
-               J_node, h_node
+        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node
 
     @property
     def expected_info_params(self):
@@ -543,24 +542,46 @@ class LDSStatesMissingData(LDSStates):
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             self.dynamics_distn.meanfield_expectedstats()
 
-        # Negate J_pair_21 (np.linalg.solve(sigma_states, A)
-        J_pair_21 = -J_pair_21
+        # TODO: Check the logic behind these expectations.
+        # Do we need to worry about correlations between A,B in E_BT_Qinv_A, for example?
+        E_Qinv = J_pair_22
+        E_AT_Qinv = J_pair_21[:, :self.n].T.copy("C")
+        E_BT_Qinv = J_pair_21[:, self.n:].T
+        E_BT_Qinv_A = E_BT_Qinv.dot(np.linalg.solve(E_Qinv, E_AT_Qinv.T))
+        E_AT_Qinv_A = J_pair_11[:self.n, :self.n].copy("C")
+
+        h_pair_1 = -self.inputs.dot(E_BT_Qinv_A)
+        h_pair_2 = self.inputs.dot(E_BT_Qinv)
+
+        # J_yy, J_yx, J_node, logdet_node = \
+        #     self.emission_distn.meanfield_expectedstats()
+        # E_Rinv = J_yy
+        # E_Rinv_C = J_yx[:, :self.n].copy("C")
+        # E_Rinv_D = J_yx[:, self.n:].copy("C")
+        # E_DT_Rinv_C = E_Rinv_D.T.dot(np.linalg.solve(E_Rinv, E_Rinv_C))
+        # E_CT_Rinv_C = J_node[:self.n, :self.n].copy("C")
+
+        # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
+        # h_node = self.data.dot(E_Rinv_C) - self.inputs.dot(E_DT_Rinv_C)
 
         if self.diagonal_noise:
             # Use the fact that the diagonalregression prior is factorized
             E_C, E_CCT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
+            E_C, E_D = E_C[:, :self.n], E_C[:, self.n:]
             E_CCT_vec = E_CCT.reshape(self.p, -1)
-            Jobs = self.mask * E_sigmasq_inv
-            J_node = (np.dot(Jobs, E_CCT_vec)).reshape((self.T, self.n, self.n))
-            h_node = (self.data * Jobs).dot(E_C)
+
+            J_obs = self.mask * E_sigmasq_inv
+            J_node = (np.dot(J_obs, E_CCT_vec)).reshape((self.T, self.n, self.n))
+            h_node = (self.data * J_obs).dot(E_C) - (self.inputs.dot(E_D.T) * J_obs).dot(E_C)
 
         else:
             raise NotImplementedError("Only supporting diagonal regression class right now")
 
-        return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, J_node, h_node
+        return J_init, h_init, E_AT_Qinv_A, -E_AT_Qinv, E_Qinv, h_pair_1, h_pair_2, J_node, h_node
 
     @property
     def extra_expected_info_params(self):
+        # TODO: Fix me!
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
@@ -584,8 +605,10 @@ class LDSStatesMissingData(LDSStates):
 
             # Update the normalization constant
             self._normalizer += self._extra_loglike_terms(
-                self.A, self.sigma_states, self.C, self.sigma_obs,
-                self.mu_init, self.sigma_init, self.mask * self.data,
+                self.A, self.B, self.sigma_states,
+                self.C, self.D, self.sigma_obs,
+                self.mu_init, self.sigma_init,
+                self.inputs, self.mask * self.data,
                 isdiag=self.diagonal_noise)
 
         return self._normalizer
@@ -603,7 +626,7 @@ class LDSStatesMissingData(LDSStates):
     def smooth(self):
         if not hasattr(self, "smoothed_mus"):
             self.info_E_step()
-        return self.smoothed_mus.dot(self.C.T)
+        return self.smoothed_mus.dot(self.C.T) + self.inputs.dot(self.D.T)
 
     def info_E_step(self):
         self._normalizer, self.smoothed_mus, \
@@ -611,8 +634,10 @@ class LDSStatesMissingData(LDSStates):
             info_E_step(*self.info_params)
 
         self._normalizer += self._extra_loglike_terms(
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.mask * self.data,
+            self.A, self.B, self.sigma_states,
+            self.C, self.D, self.sigma_obs,
+            self.mu_init, self.sigma_init,
+            self.inputs, self.mask * self.data,
             isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
@@ -622,8 +647,10 @@ class LDSStatesMissingData(LDSStates):
         self._normalizer, self.stateseq = info_sample(*self.info_params)
 
         self._normalizer += self._extra_loglike_terms(
-            self.A, self.sigma_states, self.C, self.sigma_obs,
-            self.mu_init, self.sigma_init, self.mask * self.data,
+            self.A, self.B, self.sigma_states,
+            self.C, self.D, self.sigma_obs,
+            self.mu_init, self.sigma_init,
+            self.inputs, self.mask * self.data,
             isdiag=self.diagonal_noise)
 
     def E_step(self):
@@ -642,18 +669,137 @@ class LDSStatesMissingData(LDSStates):
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
 
-    def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
+    # def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
+    #     assert not np.isnan(E_xtp1_xtT).any()
+    #     assert not np.isnan(smoothed_mus).any()
+    #     assert not np.isnan(smoothed_sigmas).any()
+    #
+    #     p, n, T, data, mask = self.p, self.n, self.T, self.data, self.mask
+    #     ExxT = smoothed_sigmas + \
+    #            self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+    #
+    #     E_xtp1_xtp1T = ExxT[1:].sum(0)
+    #     E_xt_xtT = ExxT[:-1].sum(0)
+    #     E_xtp1_xtT = E_xtp1_xtT.sum(0)
+    #
+    #     def is_symmetric(A):
+    #         return np.allclose(A, A.T)
+    #
+    #     assert is_symmetric(E_xt_xtT)
+    #     assert is_symmetric(E_xtp1_xtp1T)
+    #
+    #     self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
+    #
+    #     # Get the emission stats
+    #     E_ysq = np.sum(data**2 * mask, axis=0)
+    #     E_yxT = (data * mask).T.dot(smoothed_mus)
+    #     E_xxT_vec = ExxT.reshape((T, n**2))
+    #     E_xxT = np.array([np.dot(self.mask[:, d], E_xxT_vec).reshape((n, n)) for d in range(p)])
+    #     Tp = np.sum(self.mask, axis=0)
+    #
+    #     self.E_emission_stats = objarray([E_ysq, E_yxT, E_xxT, Tp])
+    #
+
+    def _set_expected_stats2(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
         assert not np.isnan(E_xtp1_xtT).any()
         assert not np.isnan(smoothed_mus).any()
         assert not np.isnan(smoothed_sigmas).any()
 
-        p, n, T, data, mask = self.p, self.n, self.T, self.data, self.mask
-        ExxT = smoothed_sigmas + \
-               self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+        inputs, data = self.inputs, self.data
 
-        E_xtp1_xtp1T = ExxT[1:].sum(0)
-        E_xt_xtT = ExxT[:-1].sum(0)
+        # EyxT = data.T.dot(smoothed_mus)
+        #
+        # ExxT = smoothed_sigmas + \
+        #        self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+        #
+        # E_xtp1_xtp1T = ExxT[1:].sum(0)
+        # E_xt_xtT = ExxT[:-1].sum(0)
+
+        # Now xx <- [x, u]
+        EyyT = data.T.dot(data)
+        EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
+        # E[xx xx^T] =
+        #  [[ E[xxT], E[xuT] ],
+        #   [ E[uxT], E[uuT] ]]
+        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+        ExuT = smoothed_mus.T.dot(inputs)
+        EuuT = inputs.T.dot(inputs)
+
+        ExuxuT = np.asarray(
+            np.bmat([[ExxT, ExuT],
+                     [ExuT.T, EuuT]]))
+
+        # Account for the stats from all but the last time bin
+        Exm1xm1T = \
+            smoothed_sigmas[-1] + \
+            np.outer(smoothed_mus[-1], smoothed_mus[-1])
+        Exm1um1T = np.outer(smoothed_mus[-1], inputs[-1])
+        Eum1um1T = np.outer(inputs[-1], inputs[-1])
+        Exum1xum1T = \
+            np.asarray(np.bmat(
+                [[Exm1xm1T, Exm1um1T],
+                 [Exm1um1T.T, Eum1um1T]]))
+
+        E_xut_xutT = ExuxuT - Exum1xum1T
+
+        # Account for the stats from all but the last time bin
+        Ex0x0T = \
+            smoothed_sigmas[0] + \
+            np.outer(smoothed_mus[0], smoothed_mus[0])
+        Ex0u0T = np.outer(smoothed_mus[0], inputs[0])
+        Eu0u0T = np.outer(inputs[0], inputs[0])
+        Exu0xu0T = \
+            np.asarray(np.bmat(
+                [[Ex0x0T, Ex0u0T],
+                 [Ex0u0T.T, Eu0u0T]]))
+
+        E_xutp1_xutp1T = ExuxuT - Exu0xu0T
+
+        # Compute the total statistics by summing over all time
+        # E[(xp1, up1) (x, u)^T] =
+        #  [[ E[xp1 xT], E[xp1 uT] ],
+        #   [ E[up1 xT], E[up1 uT] ]]
+
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
+        E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
+        E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
+        E_utp1_utT = inputs[1:].T.dot(inputs[:-1])
+        E_xutp1_xutT = \
+            np.asarray(np.bmat(
+                [[E_xtp1_xtT, E_xtp1_utT],
+                 [E_utp1_xtT, E_utp1_utT]]))
+
+        def is_symmetric(A):
+            return np.allclose(A, A.T)
+
+        assert is_symmetric(ExuxuT)
+        assert is_symmetric(E_xut_xutT)
+        assert is_symmetric(E_xutp1_xutp1T)
+
+        self.E_dynamics_stats = np.array(
+            [E_xutp1_xutp1T[:self.n, :self.n], E_xutp1_xutT[:self.n, :], E_xut_xutT, self.T - 1])
+
+        self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
+
+    def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
+        # Get the emission stats
+        p, n, d, T, mask, inputs, data = self.p, self.n, self.d, self.T, self.mask, self.inputs, self.data
+        E_x_xT = smoothed_sigmas + self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+        E_x_uT = smoothed_mus[:,:,None] * self.inputs[:,None,:]
+        E_u_uT = self.inputs[:,:,None] * self.inputs[:,None,:]
+
+        E_xu_xuT = np.concatenate((
+            np.concatenate((E_x_xT,   E_x_uT), axis=2),
+            np.concatenate((np.transpose(E_x_uT, (0,2,1)), E_u_uT), axis=2)),
+            axis=1)
+        E_xut_xutT = E_xu_xuT[:-1].sum(0)
+
+        E_xtp1_xtp1T = E_x_xT[1:].sum(0)
+        E_xt_xtT = E_x_xT[:-1].sum(0)
+        E_xtp1_xtT = E_xtp1_xtT.sum(0)
+
+        E_xtp1_utT = (smoothed_mus[1:,:,None] * inputs[:-1, None, :]).sum(0)
+        E_xtp1_xutT = np.hstack((E_xtp1_xtT, E_xtp1_utT))
 
         def is_symmetric(A):
             return np.allclose(A, A.T)
@@ -661,13 +807,18 @@ class LDSStatesMissingData(LDSStates):
         assert is_symmetric(E_xt_xtT)
         assert is_symmetric(E_xtp1_xtp1T)
 
-        self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
+        self.E_dynamics_stats = np.array(
+            [E_xtp1_xtp1T, E_xtp1_xutT, E_xut_xutT, self.T - 1])
 
-        # Get the emission stats
+        # Emission statistics
         E_ysq = np.sum(data**2 * mask, axis=0)
         E_yxT = (data * mask).T.dot(smoothed_mus)
-        E_xxT_vec = ExxT.reshape((T, n**2))
-        E_xxT = np.array([np.dot(self.mask[:, d], E_xxT_vec).reshape((n, n)) for d in range(p)])
+        E_yuT = (data * mask).T.dot(inputs)
+        E_yxuT = np.hstack((E_yxT, E_yuT))
+        E_xuxuT_vec = E_xu_xuT.reshape((T, -1))
+        E_xuxuT = np.array([np.dot(self.mask[:, i], E_xuxuT_vec).reshape((n+d, n+d))
+                          for i in range(p)])
         Tp = np.sum(self.mask, axis=0)
 
-        self.E_emission_stats = objarray([E_ysq, E_yxT, E_xxT, Tp])
+        self.E_emission_stats = objarray([E_ysq, E_yxuT, E_xuxuT, Tp])
+

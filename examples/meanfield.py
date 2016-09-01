@@ -63,7 +63,7 @@ def update(model):
 for _ in progprint_xrange(100):
     model.resample_model()
 
-vlbs = [update(model) for _ in progprint_xrange(50)]
+vlbs = [update(model) for _ in progprint_xrange(500)]
 model.resample_from_mf()
 
 plt.figure(figsize=(3,4))
