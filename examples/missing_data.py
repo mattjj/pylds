@@ -105,14 +105,14 @@ def svi_update(model, stepsize, minibatchsize):
 
 
 # Gibbs
-# lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
+lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
 
 ## EM -- initialized with a few Gibbs iterations
 # [model.resample_model() for _ in progprint_xrange(100)]
 # lls = [em_update(model) for _ in progprint_xrange(N_samples)]
 
 ## Mean field
-lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
+# lls = [meanfield_update(model) for _ in progprint_xrange(N_samples)]
 
 ## SVI
 # delay = 10.0

@@ -203,7 +203,20 @@ class LDSStates(object):
         # E[(xp1, up1) (x, u)^T] =
         #  [[ E[xp1 xT], E[xp1 uT] ],
         #   [ E[up1 xT], E[up1 uT] ]]
+        ExxT = smoothed_sigmas + \
+               self.smoothed_mus[:,:,None] * self.smoothed_mus[:,None,:]
 
+        E_xtp1_xtp1T = ExxT[1:].sum(0)
+        E_xt_xtT = ExxT[:-1].sum(0)
+        # ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+        #
+        # E_xt_xtT = \
+        #     ExxT - (smoothed_sigmas[-1]
+        #             + np.outer(smoothed_mus[-1],smoothed_mus[-1]))
+        # E_xtp1_xtp1T = \
+        #     ExxT - (smoothed_sigmas[0]
+        #             + np.outer(smoothed_mus[0], smoothed_mus[0]))
+        #
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
         E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
         E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
@@ -529,6 +542,8 @@ class LDSStatesMissingData(LDSStates):
             CCT_vec = np.reshape(CCT, (self.p,self.n**2))
             J_node = (np.dot(Jobs, CCT_vec)).reshape((self.T, self.n, self.n))
             h_node = (self.data * Jobs).dot(self.C)
+
+            # TODO Subtract inputs!
         else:
             raise NotImplementedError("Only supporting diagonal observations for missing data")
 
@@ -668,7 +683,6 @@ class LDSStatesMissingData(LDSStates):
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
-
     # def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
     #     assert not np.isnan(E_xtp1_xtT).any()
     #     assert not np.isnan(smoothed_mus).any()
@@ -801,6 +815,7 @@ class LDSStatesMissingData(LDSStates):
         E_xtp1_utT = (smoothed_mus[1:,:,None] * inputs[:-1, None, :]).sum(0)
         E_xtp1_xutT = np.hstack((E_xtp1_xtT, E_xtp1_utT))
 
+
         def is_symmetric(A):
             return np.allclose(A, A.T)
 
@@ -821,4 +836,3 @@ class LDSStatesMissingData(LDSStates):
         Tp = np.sum(self.mask, axis=0)
 
         self.E_emission_stats = objarray([E_ysq, E_yxuT, E_xuxuT, Tp])
-
