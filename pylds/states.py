@@ -144,97 +144,43 @@ class LDSStates(object):
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
 
-    def _set_expected_stats(self,smoothed_mus,smoothed_sigmas,E_xtp1_xtT):
-        assert not np.isnan(E_xtp1_xtT).any()
-        assert not np.isnan(smoothed_mus).any()
-        assert not np.isnan(smoothed_sigmas).any()
+    def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
+        # Get the emission stats
+        p, n, d, T, inputs, data = self.p, self.n, self.d, self.T, self.inputs, self.data
+        E_x_xT = smoothed_sigmas + self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+        E_x_uT = smoothed_mus[:,:,None] * self.inputs[:,None,:]
+        E_u_uT = self.inputs[:,:,None] * self.inputs[:,None,:]
 
-        inputs, data = self.inputs, self.data
+        E_xu_xuT = np.concatenate((
+            np.concatenate((E_x_xT, E_x_uT), axis=2),
+            np.concatenate((np.transpose(E_x_uT, (0,2,1)), E_u_uT), axis=2)),
+            axis=1)
+        E_xut_xutT = E_xu_xuT[:-1].sum(0)
 
-        # EyxT = data.T.dot(smoothed_mus)
-        #
-        # ExxT = smoothed_sigmas + \
-        #        self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
-        #
-        # E_xtp1_xtp1T = ExxT[1:].sum(0)
-        # E_xt_xtT = ExxT[:-1].sum(0)
-
-        # Now xx <- [x, u]
-        EyyT = data.T.dot(data)
-        EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
-        # E[xx xx^T] =
-        #  [[ E[xxT], E[xuT] ],
-        #   [ E[uxT], E[uuT] ]]
-        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
-        ExuT = smoothed_mus.T.dot(inputs)
-        EuuT = inputs.T.dot(inputs)
-
-        ExuxuT = np.asarray(
-            np.bmat([[ExxT,   ExuT],
-                     [ExuT.T, EuuT]]))
-
-        # Account for the stats from all but the last time bin
-        Exm1xm1T = \
-            smoothed_sigmas[-1] + \
-            np.outer(smoothed_mus[-1],smoothed_mus[-1])
-        Exm1um1T = np.outer(smoothed_mus[-1], inputs[-1])
-        Eum1um1T = np.outer(inputs[-1], inputs[-1])
-        Exum1xum1T = \
-            np.asarray(np.bmat(
-                [[Exm1xm1T,   Exm1um1T],
-                [Exm1um1T.T, Eum1um1T]]))
-
-        E_xut_xutT = ExuxuT - Exum1xum1T
-
-        # Account for the stats from all but the last time bin
-        Ex0x0T = \
-            smoothed_sigmas[0] + \
-            np.outer(smoothed_mus[0], smoothed_mus[0])
-        Ex0u0T = np.outer(smoothed_mus[0], inputs[0])
-        Eu0u0T = np.outer(inputs[0], inputs[0])
-        Exu0xu0T = \
-            np.asarray(np.bmat(
-                [[Ex0x0T, Ex0u0T],
-                [Ex0u0T.T, Eu0u0T]]))
-
-        E_xutp1_xutp1T = ExuxuT - Exu0xu0T
-
-        # Compute the total statistics by summing over all time
-        # E[(xp1, up1) (x, u)^T] =
-        #  [[ E[xp1 xT], E[xp1 uT] ],
-        #   [ E[up1 xT], E[up1 uT] ]]
-        ExxT = smoothed_sigmas + \
-               self.smoothed_mus[:,:,None] * self.smoothed_mus[:,None,:]
-
-        E_xtp1_xtp1T = ExxT[1:].sum(0)
-        E_xt_xtT = ExxT[:-1].sum(0)
-        # ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
-        #
-        # E_xt_xtT = \
-        #     ExxT - (smoothed_sigmas[-1]
-        #             + np.outer(smoothed_mus[-1],smoothed_mus[-1]))
-        # E_xtp1_xtp1T = \
-        #     ExxT - (smoothed_sigmas[0]
-        #             + np.outer(smoothed_mus[0], smoothed_mus[0]))
-        #
+        E_xtp1_xtp1T = E_x_xT[1:].sum(0)
+        E_xt_xtT = E_x_xT[:-1].sum(0)
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
-        E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
-        E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
-        E_utp1_utT = inputs[1:].T.dot(inputs[:-1])
-        E_xutp1_xutT = \
-            np.asarray(np.bmat(
-                [[E_xtp1_xtT, E_xtp1_utT],
-                 [E_utp1_xtT, E_utp1_utT]]))
+
+        E_xtp1_utT = (smoothed_mus[1:,:,None] * inputs[:-1, None, :]).sum(0)
+        E_xtp1_xutT = np.hstack((E_xtp1_xtT, E_xtp1_utT))
+
 
         def is_symmetric(A):
-            return np.allclose(A,A.T)
+            return np.allclose(A, A.T)
 
-        assert is_symmetric(ExuxuT)
-        assert is_symmetric(E_xut_xutT)
-        assert is_symmetric(E_xutp1_xutp1T)
+        assert is_symmetric(E_xt_xtT)
+        assert is_symmetric(E_xtp1_xtp1T)
 
-        self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
-        self.E_dynamics_stats = np.array([E_xutp1_xutp1T[:self.n,:self.n], E_xutp1_xutT[:self.n,:], E_xut_xutT, self.T-1])
+        self.E_dynamics_stats = np.array(
+            [E_xtp1_xtp1T, E_xtp1_xutT, E_xut_xutT, self.T - 1])
+
+        # Emission statistics
+        E_yyT = data.T.dot(data)
+        E_yxT = data.T.dot(smoothed_mus)
+        E_yuT = data.T.dot(inputs)
+        E_yxuT = np.hstack((E_yxT, E_yuT))
+
+        self.E_emission_stats = objarray([E_yyT, E_yxuT, E_xu_xuT.sum(0), T])
 
     # next two methods are for testing
 
@@ -688,112 +634,81 @@ class LDSStatesMissingData(LDSStates):
     #     assert not np.isnan(smoothed_mus).any()
     #     assert not np.isnan(smoothed_sigmas).any()
     #
-    #     p, n, T, data, mask = self.p, self.n, self.T, self.data, self.mask
-    #     ExxT = smoothed_sigmas + \
-    #            self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+    #     inputs, data = self.inputs, self.data
     #
-    #     E_xtp1_xtp1T = ExxT[1:].sum(0)
-    #     E_xt_xtT = ExxT[:-1].sum(0)
+    #     # EyxT = data.T.dot(smoothed_mus)
+    #     #
+    #     # ExxT = smoothed_sigmas + \
+    #     #        self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
+    #     #
+    #     # E_xtp1_xtp1T = ExxT[1:].sum(0)
+    #     # E_xt_xtT = ExxT[:-1].sum(0)
+    #
+    #     # Now xx <- [x, u]
+    #     EyyT = data.T.dot(data)
+    #     EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
+    #     # E[xx xx^T] =
+    #     #  [[ E[xxT], E[xuT] ],
+    #     #   [ E[uxT], E[uuT] ]]
+    #     ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
+    #     ExuT = smoothed_mus.T.dot(inputs)
+    #     EuuT = inputs.T.dot(inputs)
+    #
+    #     ExuxuT = np.asarray(
+    #         np.bmat([[ExxT, ExuT],
+    #                  [ExuT.T, EuuT]]))
+    #
+    #     # Account for the stats from all but the last time bin
+    #     Exm1xm1T = \
+    #         smoothed_sigmas[-1] + \
+    #         np.outer(smoothed_mus[-1], smoothed_mus[-1])
+    #     Exm1um1T = np.outer(smoothed_mus[-1], inputs[-1])
+    #     Eum1um1T = np.outer(inputs[-1], inputs[-1])
+    #     Exum1xum1T = \
+    #         np.asarray(np.bmat(
+    #             [[Exm1xm1T, Exm1um1T],
+    #              [Exm1um1T.T, Eum1um1T]]))
+    #
+    #     E_xut_xutT = ExuxuT - Exum1xum1T
+    #
+    #     # Account for the stats from all but the last time bin
+    #     Ex0x0T = \
+    #         smoothed_sigmas[0] + \
+    #         np.outer(smoothed_mus[0], smoothed_mus[0])
+    #     Ex0u0T = np.outer(smoothed_mus[0], inputs[0])
+    #     Eu0u0T = np.outer(inputs[0], inputs[0])
+    #     Exu0xu0T = \
+    #         np.asarray(np.bmat(
+    #             [[Ex0x0T, Ex0u0T],
+    #              [Ex0u0T.T, Eu0u0T]]))
+    #
+    #     E_xutp1_xutp1T = ExuxuT - Exu0xu0T
+    #
+    #     # Compute the total statistics by summing over all time
+    #     # E[(xp1, up1) (x, u)^T] =
+    #     #  [[ E[xp1 xT], E[xp1 uT] ],
+    #     #   [ E[up1 xT], E[up1 uT] ]]
+    #
     #     E_xtp1_xtT = E_xtp1_xtT.sum(0)
+    #     E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
+    #     E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
+    #     E_utp1_utT = inputs[1:].T.dot(inputs[:-1])
+    #     E_xutp1_xutT = \
+    #         np.asarray(np.bmat(
+    #             [[E_xtp1_xtT, E_xtp1_utT],
+    #              [E_utp1_xtT, E_utp1_utT]]))
     #
     #     def is_symmetric(A):
     #         return np.allclose(A, A.T)
     #
-    #     assert is_symmetric(E_xt_xtT)
-    #     assert is_symmetric(E_xtp1_xtp1T)
+    #     assert is_symmetric(ExuxuT)
+    #     assert is_symmetric(E_xut_xutT)
+    #     assert is_symmetric(E_xutp1_xutp1T)
     #
-    #     self.E_dynamics_stats = np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
+    #     self.E_dynamics_stats = np.array(
+    #         [E_xutp1_xutp1T[:self.n, :self.n], E_xutp1_xutT[:self.n, :], E_xut_xutT, self.T - 1])
     #
-    #     # Get the emission stats
-    #     E_ysq = np.sum(data**2 * mask, axis=0)
-    #     E_yxT = (data * mask).T.dot(smoothed_mus)
-    #     E_xxT_vec = ExxT.reshape((T, n**2))
-    #     E_xxT = np.array([np.dot(self.mask[:, d], E_xxT_vec).reshape((n, n)) for d in range(p)])
-    #     Tp = np.sum(self.mask, axis=0)
-    #
-    #     self.E_emission_stats = objarray([E_ysq, E_yxT, E_xxT, Tp])
-    #
-
-    def _set_expected_stats2(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
-        assert not np.isnan(E_xtp1_xtT).any()
-        assert not np.isnan(smoothed_mus).any()
-        assert not np.isnan(smoothed_sigmas).any()
-
-        inputs, data = self.inputs, self.data
-
-        # EyxT = data.T.dot(smoothed_mus)
-        #
-        # ExxT = smoothed_sigmas + \
-        #        self.smoothed_mus[:, :, None] * self.smoothed_mus[:, None, :]
-        #
-        # E_xtp1_xtp1T = ExxT[1:].sum(0)
-        # E_xt_xtT = ExxT[:-1].sum(0)
-
-        # Now xx <- [x, u]
-        EyyT = data.T.dot(data)
-        EyxuT = data.T.dot(np.hstack((smoothed_mus, inputs)))
-        # E[xx xx^T] =
-        #  [[ E[xxT], E[xuT] ],
-        #   [ E[uxT], E[uuT] ]]
-        ExxT = smoothed_sigmas.sum(0) + smoothed_mus.T.dot(smoothed_mus)
-        ExuT = smoothed_mus.T.dot(inputs)
-        EuuT = inputs.T.dot(inputs)
-
-        ExuxuT = np.asarray(
-            np.bmat([[ExxT, ExuT],
-                     [ExuT.T, EuuT]]))
-
-        # Account for the stats from all but the last time bin
-        Exm1xm1T = \
-            smoothed_sigmas[-1] + \
-            np.outer(smoothed_mus[-1], smoothed_mus[-1])
-        Exm1um1T = np.outer(smoothed_mus[-1], inputs[-1])
-        Eum1um1T = np.outer(inputs[-1], inputs[-1])
-        Exum1xum1T = \
-            np.asarray(np.bmat(
-                [[Exm1xm1T, Exm1um1T],
-                 [Exm1um1T.T, Eum1um1T]]))
-
-        E_xut_xutT = ExuxuT - Exum1xum1T
-
-        # Account for the stats from all but the last time bin
-        Ex0x0T = \
-            smoothed_sigmas[0] + \
-            np.outer(smoothed_mus[0], smoothed_mus[0])
-        Ex0u0T = np.outer(smoothed_mus[0], inputs[0])
-        Eu0u0T = np.outer(inputs[0], inputs[0])
-        Exu0xu0T = \
-            np.asarray(np.bmat(
-                [[Ex0x0T, Ex0u0T],
-                 [Ex0u0T.T, Eu0u0T]]))
-
-        E_xutp1_xutp1T = ExuxuT - Exu0xu0T
-
-        # Compute the total statistics by summing over all time
-        # E[(xp1, up1) (x, u)^T] =
-        #  [[ E[xp1 xT], E[xp1 uT] ],
-        #   [ E[up1 xT], E[up1 uT] ]]
-
-        E_xtp1_xtT = E_xtp1_xtT.sum(0)
-        E_xtp1_utT = smoothed_mus[1:].T.dot(inputs[:-1])
-        E_utp1_xtT = inputs[1:].T.dot(smoothed_mus[:-1])
-        E_utp1_utT = inputs[1:].T.dot(inputs[:-1])
-        E_xutp1_xutT = \
-            np.asarray(np.bmat(
-                [[E_xtp1_xtT, E_xtp1_utT],
-                 [E_utp1_xtT, E_utp1_utT]]))
-
-        def is_symmetric(A):
-            return np.allclose(A, A.T)
-
-        assert is_symmetric(ExuxuT)
-        assert is_symmetric(E_xut_xutT)
-        assert is_symmetric(E_xutp1_xutp1T)
-
-        self.E_dynamics_stats = np.array(
-            [E_xutp1_xutp1T[:self.n, :self.n], E_xutp1_xutT[:self.n, :], E_xut_xutT, self.T - 1])
-
-        self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
+    #     self.E_emission_stats = np.array([EyyT, EyxuT, ExuxuT, self.T])
 
     def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
         # Get the emission stats

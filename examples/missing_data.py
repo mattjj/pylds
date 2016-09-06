@@ -172,7 +172,7 @@ for i in range(N_subplots):
     plt.ylabel("$x_%d(t)$" % (i+1))
     plt.ylim(ylims)
     plt.xlim(xlims)
-plt.savefig("missing_data_ex_lownoise.png")
+# plt.savefig("missing_data_ex_lownoise.png")
 
 ################
 #  predicting  #

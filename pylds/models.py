@@ -71,7 +71,7 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, mask=None, states_noise=True, obs_noise=True):
+    def sample_predictions(self, data, Tpred, inputs=None, mask=None, states_noise=True, obs_noise=True):
         self.add_data(data, mask=mask, generate=False)
         s = self.states_list.pop()
         return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
