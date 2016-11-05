@@ -43,6 +43,11 @@ class _LDSStates(object):
     def log_likelihood(self):
         if self._normalizer is None:
             self._normalizer, _, _ = kalman_info_filter(*self.info_params)
+
+            self._normalizer += self._info_extra_loglike_terms(
+                *self.extra_info_params,
+                isdiag=self.diagonal_noise)
+
         return self._normalizer
 
     def generate_states(self):
@@ -224,6 +229,10 @@ class _LDSStates(object):
         Q = self.sigma_states
         logdet_pair = -np.linalg.slogdet(Q)[1]
 
+        # We need terms for u_t B^T Q^{-1} B u
+        B = self.B
+        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
+
         # Observations
         if self.diagonal_noise:
             # Use the fact that the diagonalregression prior is factorized
@@ -231,17 +240,24 @@ class _LDSStates(object):
             J_yy = 1./rsq
             logdet_node = -np.sum(np.log(rsq))
 
+            # We need terms for u_t D^T R^{-1} D u
+            D = self.D
+            hJh_node = D.T.dot(np.diag(J_yy).dot(D))
+
         else:
             R = self.sigma_obs
             J_yy = np.linalg.inv(R)
             logdet_node = -np.linalg.slogdet(R)[1]
 
+            # We need terms for u_t D^T R^{-1} D u
+            D = self.D
+            hJh_node = D.T.dot(np.linalg.solve(R, D))
 
-        return J_init, h_init, logdet_pair, J_yy, logdet_node, self.data
+        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, self.data
 
     @staticmethod
     def _info_extra_loglike_terms(
-            J_init, h_init, logdet_pair, J_yy, logdet_node, data,
+            J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, inputs, data,
             isdiag=False):
         warn("Log likelihood calculations are not correct!")
         p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
@@ -253,11 +269,16 @@ class _LDSStates(object):
         out += 1./2 * np.linalg.slogdet(J_init)[1]
         out -= n/2. * np.log(2*np.pi)
 
-        # dynamics distribution
+        # -1/2 log |Q| -n/2 log(2pi)
         out += 1./2 * logdet_pair.sum() if isinstance(logdet_pair, np.ndarray) \
             else (T-1)/2. * logdet_pair
         out -= (T-1)*n/2. * np.log(2*np.pi)
 
+        # We need terms for u_t B^T Q^{-1} B u
+        contract = 'ij,ti,tj->' if hJh_pair.ndim == 2 else 'tij,ti,tj->'
+        out -= 1. / 2 * np.einsum(contract, hJh_pair, inputs[:-1], inputs[:-1])
+
+        # -1/2 y^T R^{-1} y
         if isdiag:
             assert (J_yy.ndim == 1 and J_yy.shape[0] == data.shape[1]) or \
                    (J_yy.shape == data.shape)
@@ -266,6 +287,11 @@ class _LDSStates(object):
             contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
             out -= 1./2 * np.einsum(contract, J_yy, data, data)
 
+        # We need terms for u_t D^T R^{-1} D u
+        contract = 'ij,ti,tj->' if hJh_node.ndim == 2 else 'tij,ti,tj->'
+        out -= 1. / 2 * np.einsum(contract, hJh_node, inputs, inputs)
+
+        # -1/2 log |R| -p/2 log(2 pi)
         out += 1./2 * logdet_node.sum() if isinstance(logdet_node, np.ndarray) \
             else T/2. * logdet_node
         out -= T*p/2. * np.log(2*np.pi)
@@ -428,21 +454,27 @@ class _LDSStatesMeanField(_LDSStates):
 
     @property
     def expected_extra_info_params(self):
+        n = self.D_latent
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
-        _, _, _, logdet_pair = self.dynamics_distn.meanfield_expectedstats()
+        _, _, J_pair_11, logdet_pair = self.dynamics_distn.meanfield_expectedstats()
+        hJh_pair = J_pair_11[n:, n:]
 
         # Observations
         if self.diagonal_noise:
-            J_yy = self.emission_distn.mf_expectations[2]
-            logdet_node = -np.sum(self.emission_distn.mf_expectations[3])
+            _, mf_E_CCT, mf_E_sigmasq_inv, mf_E_log_sigmasq = self.emission_distn.mf_expectations
+            J_yy = mf_E_sigmasq_inv
+            logdet_node = -np.sum(mf_E_log_sigmasq)
 
+            mf_E_DDT = mf_E_CCT[:,n:,n:]
+            hJh_node = np.sum(mf_E_DDT * mf_E_sigmasq_inv[:,None,None], axis=0)
         else:
-            J_yy, _, _, logdet_node = \
+            J_yy, _, J_node, logdet_node = \
                 self.emission_distn.meanfield_expectedstats()
+            hJh_node = J_node[n:, n:]
 
-        return J_init, h_init, logdet_pair, J_yy, logdet_node, self.data
+        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, self.data
 
     def meanfieldupdate(self):
         self._mf_lds_normalizer, self.smoothed_mus, self.smoothed_sigmas, \

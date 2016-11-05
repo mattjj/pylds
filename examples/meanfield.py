@@ -62,31 +62,37 @@ def update(model):
 for _ in progprint_xrange(100):
     model.resample_model()
 
-vlbs = [update(model) for _ in progprint_xrange(500)]
+N_steps = 100
+vlbs = [update(model) for _ in progprint_xrange(N_steps)]
 model.resample_from_mf()
 
 plt.figure(figsize=(3,4))
+plt.plot([0, N_steps], truemodel.log_likelihood()*np.ones(2), '--k')
 plt.plot(vlbs)
 plt.xlabel('iteration')
 plt.ylabel('variational lower bound')
 plt.show()
 
 ################
+#  smoothing   #
+################
+E_C, E_D = model.C, model.D
+smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T) + inputs.dot(E_D.T)
+
+################
 #  predicting  #
 ################
 Nseed = 1700
 Npredict = 100
-given_data = data[:Nseed]
-given_inputs = inputs[:Nseed]
-pred_inputs = inputs[Nseed:Nseed+Npredict]
-predictions = model.sample_predictions(given_data,
-                                       inputs=given_inputs,
-                                       Tpred=Npredict,
-                                       inputs_pred=pred_inputs)
+prediction_seed = data[:Nseed]
+
+model.emission_distn.resample_from_mf()
+predictions = model.sample_predictions(prediction_seed, Npredict)
 
 plt.figure()
-plt.plot(data, 'b-')
-plt.plot(given_data.shape[0] + np.arange(Npredict), predictions, 'r--')
+plt.plot(data, 'k')
+plt.plot(smoothed_obs[:Nseed], ':k')
+plt.plot(Nseed + np.arange(Npredict), predictions, 'b')
 plt.xlabel('time index')
 plt.ylabel('prediction')
 

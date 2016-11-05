@@ -227,7 +227,7 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
             s.meanfieldupdate()
 
     def meanfield_update_parameters(self):
-        self.meanfield_update_dynamics_distn()
+        # self.meanfield_update_dynamics_distn()
         self.meanfield_update_emission_distn()
 
     def meanfield_update_dynamics_distn(self):
@@ -248,10 +248,6 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
         vlb += self.emission_distn.get_vlb()
         vlb += self.dynamics_distn.get_vlb()
         return vlb
-
-    def resample_from_mf(self):
-        self.dynamics_distn.resample_from_mf()
-        self.emission_distn.resample_from_mf()
 
 
 class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):

@@ -14,52 +14,59 @@ npr.seed(0)
 #########################
 #  set some parameters  #
 #########################
-D_obs, D_latent = 1, 2
+D_obs = 1
+D_latent = 2
+D_input = 1
+T = 2000
+
 mu_init = np.array([0.,1.])
 sigma_init = 0.01*np.eye(2)
 
 A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
-                   [np.sin(np.pi/24), np.cos(np.pi/24)]])
+                   [np.sin(np.pi/24),  np.cos(np.pi/24)]])
+B = np.ones((D_latent, D_input))
 sigma_states = 0.01*np.eye(2)
 
 C = np.array([[10.,0.]])
+D = np.zeros((D_obs, D_input))
 sigma_obs = 0.01*np.eye(1)
-
 
 ###################
 #  generate data  #
 ###################
 
 truemodel = LDS(
-    dynamics_distn=Regression(
-            A=A,sigma=sigma_states),
-    emission_distn=DiagonalRegression(
-            D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
+    dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
+    emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
 
-data, stateseq = truemodel.generate(2000)
+inputs = np.random.randn(T, D_input)
+data, stateseq = truemodel.generate(T, inputs=inputs)
+
+
+###############
+#  make model  #
+###############
+model = LDS(
+    dynamics_distn=Regression(nu_0=D_latent + 2, S_0=D_latent * np.eye(D_latent),
+                              M_0=np.zeros((D_latent, D_latent + D_input)), K_0=(D_latent + D_input) * np.eye(D_latent + D_input)),
+    emission_distn=DiagonalRegression(D_obs, D_latent+D_input))
+model.add_data(data, inputs=inputs)
 
 
 ###############
 #  fit model  #
 ###############
-model = LDS(
-    dynamics_distn=Regression(
-            nu_0=D_latent+1,
-            S_0=D_latent*np.eye(D_latent),
-            M_0=np.zeros((D_latent, D_latent)),
-            K_0=D_latent*np.eye(D_latent)),
-    emission_distn=DiagonalRegression(D_obs, D_latent))
-model.add_data(data)
-
 def update(model):
     return model.meanfield_coordinate_descent_step()
 
 for _ in progprint_xrange(100):
     model.resample_model()
 
-vlbs = [update(model) for _ in progprint_xrange(100)]
+N_steps = 100
+vlbs = [update(model) for _ in progprint_xrange(N_steps)]
 
 plt.figure(figsize=(3,4))
+plt.plot([0, N_steps], truemodel.log_likelihood() * np.ones(2), '--k')
 plt.plot(vlbs)
 plt.xlabel('iteration')
 plt.ylabel('variational lower bound')
@@ -68,8 +75,9 @@ plt.ylabel('variational lower bound')
 ################
 #  smoothing   #
 ################
-E_C,_,_,_ = model.emission_distn.mf_expectations
-smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T)
+E_CD,_,_,_ = model.emission_distn.mf_expectations
+E_C, E_D = E_CD[:,:D_latent], E_CD[:,D_latent:]
+smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T) + inputs.dot(E_D.T)
 
 ################
 #  predicting  #

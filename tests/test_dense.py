@@ -51,11 +51,14 @@ def lds_to_dense_infoparams(model,data,inputs):
     C, D, sigma_obs = model.C, model.D, model.sigma_obs
     ss_inv = np.linalg.inv(sigma_states)
 
-    h = C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
+    h = np.zeros((T,n))
+    h[0] += np.linalg.solve(sigma_init, mu_init)
+    # Dynamics
     h[1:] += inputs[:-1].dot(B.T).dot(ss_inv)
     h[:-1] += -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states, A))
+    # Emissions
+    h += C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
     h += -inputs.dot(D.T).dot(np.linalg.solve(sigma_obs, C))
-    h[0] += np.linalg.solve(sigma_init, mu_init)
 
     J = np.kron(np.eye(T),C.T.dot(np.linalg.solve(sigma_obs,C)))
     J[:n,:n] += np.linalg.inv(sigma_init)
@@ -157,6 +160,10 @@ def random_model(n,p,d,T):
 def check_random_model(check):
     n, p, d = np.random.randint(2,5), np.random.randint(2,5), np.random.randint(0,3)
     T = np.random.randint(10,20)
+    # n = 2
+    # p = 1
+    # d = 1
+    # T = 2
     check(*random_model(n,p,d,T))
 
 
