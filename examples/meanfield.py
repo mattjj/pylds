@@ -16,7 +16,7 @@ npr.seed(0)
 #########################
 D_obs = 1
 D_latent = 2
-D_input = 0
+D_input = 1
 T = 2000
 
 mu_init = np.array([0.,1.])

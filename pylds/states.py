@@ -56,7 +56,7 @@ class _LDSStates(object):
             gss[t] = self.dynamics_distn.\
                 rvs(x=np.hstack((gss[t-1][None,:], self.inputs[t-1][None,:])),
                     return_xy=False)
-            assert np.all(np.isfinite(gss[t])), "SLDS appears to be unstable!"
+            assert np.all(np.isfinite(gss[t])), "LDS appears to be unstable!"
 
         self.gaussian_states = gss
 
@@ -242,7 +242,7 @@ class _LDSStates(object):
     def _info_extra_loglike_terms(
             J_init, h_init, logdet_pair, J_yy, logdet_node, data,
             isdiag=False):
-        # TODO: Fix me!
+        warn("Log likelihood calculations are not correct!")
         p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
 
         out = 0.
@@ -358,7 +358,6 @@ class _LDSStates(object):
         E_yxuT = np.hstack((E_yxT, E_yuT))
 
         self.E_emission_stats = objarray([E_yyT, E_yxuT, E_xu_xuT.sum(0), T])
-
 
 ######################
 #  algorithm mixins  #

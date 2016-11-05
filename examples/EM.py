@@ -17,7 +17,7 @@ npr.seed(0)
 
 D_obs = 1
 D_latent = 2
-D_input = 0
+D_input = 1
 T = 2000
 
 mu_init = np.array([0.,1.])
@@ -35,13 +35,11 @@ sigma_obs = 0.01*np.eye(1)
 ###################
 #  generate data  #
 ###################
-
 truemodel = LDS(
     dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
     emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
 
-# inputs = np.random.randn(T,d)
-inputs = np.zeros((T, D_input))
+inputs = np.random.randn(T, D_input)
 data, stateseq = truemodel.generate(T, inputs=inputs)
 
 ###############
@@ -49,9 +47,11 @@ data, stateseq = truemodel.generate(T, inputs=inputs)
 ###############
 model = LDS(
     dynamics_distn=Regression(nu_0=D_latent + 2, S_0=D_latent * np.eye(D_latent),
-                              M_0=np.zeros((D_latent, D_latent + D_input)), K_0=(D_latent + D_input) * np.eye(D_latent + D_input)),
+                              M_0=np.zeros((D_latent, D_latent + D_input)),
+                              K_0=(D_latent + D_input) * np.eye(D_latent + D_input)),
     emission_distn=Regression(nu_0=D_obs + 1, S_0=D_obs * np.eye(D_obs),
-                              M_0=np.zeros((D_obs, D_latent + D_input)), K_0=(D_latent + D_input) * np.eye(D_latent + D_input)))
+                              M_0=np.zeros((D_obs, D_latent + D_input)),
+                              K_0=(D_latent + D_input) * np.eye(D_latent + D_input)))
 model.add_data(data, inputs=inputs)
 
 ###############
