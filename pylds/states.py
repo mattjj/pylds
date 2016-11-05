@@ -645,6 +645,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if not self.has_count_data:
             return super(_LDSStatesCountData, self).info_emission_params
 
+
         # Otherwise, use the Polya-gamma augmentation
         # log p(y_{tn} | x, om)
         #   = -0.5 * om_{tn} * (c_n^T x_t + d_n^T u_t + b_n)**2
@@ -661,7 +662,10 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         # h = ((kappa - om * d) * mask).dot(C)
         T, D_latent, D_emission = self.T, self.D_latent, self.D_emission
         data, inputs, mask, omega = self.data, self.inputs, self.mask, self.omega
+        # TODO: This is hacky...
+        mask = self.mask if self.mask is not None else np.ones_like(self.data)
         emission_distn = self.emission_distn
+
         C = emission_distn.A[:, :D_latent]
         D = emission_distn.A[:,D_latent:]
         b = emission_distn.b
@@ -692,7 +696,11 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         J_yy = np.zeros((self.D_emission, self.D_emission))
         logdet_node = np.zeros((self.T))
 
-        return J_init, h_init, logdet_pair, J_yy, logdet_node, self.data * self.mask
+        masked_data = self.data * self.mask \
+            if self.mask is not None \
+            else self.data
+
+        return J_init, h_init, logdet_pair, J_yy, logdet_node, masked_data
 
     @property
     def expected_info_emission_params(self):
