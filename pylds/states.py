@@ -217,6 +217,7 @@ class _LDSStates(object):
 
     @property
     def extra_info_params(self):
+        # TODO: This should have terms related to self.inputs
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
