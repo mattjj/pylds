@@ -6,7 +6,7 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from pylds.states import LDSStates, LDSStatesMissingData
+from pylds.states import LDSStates
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence
@@ -25,20 +25,16 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self,data, inputs=None, mask=None,**kwargs):
-        # TODO: Please please please clean me up!
+    def add_data(self,data, inputs=None, mask=None, **kwargs):
         assert isinstance(data,np.ndarray)
-        if mask is None:
-            self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, **kwargs))
-        else:
-            self.states_list.append(LDSStatesMissingData(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
+        self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
         return self
 
     def log_likelihood(self, data=None, inputs=None, mask=None):
         if data is not None:
             assert isinstance(data,(list,np.ndarray))
             if isinstance(data,np.ndarray):
-                self.add_data(data=data, inputs=inputs, mask=mask, generate=False)
+                self.add_data(data=data, inputs=inputs, mask=mask)
                 return self.states_list.pop().log_likelihood()
             else:
                 return sum(self.log_likelihood(d, i) for (d, i) in zip(data, inputs))
@@ -50,20 +46,20 @@ class _LDSBase(Model):
         data = self._generate_obs(s, inputs)
         if keep:
             self.states_list.append(s)
-        return data, s.stateseq
+        return data, s.gaussian_states
 
     def _generate_obs(self,s, inputs):
         if s.data is None:
             inputs = np.zeros((s.T, 0)) if inputs is None else inputs
             s.data = self.emission_distn.rvs(
-                x=np.hstack((s.stateseq, inputs)), return_xy=False)
+                x=np.hstack((s.gaussian_states, inputs)), return_xy=False)
         else:
             # filling in missing data
             raise NotImplementedError
         return s.data
 
     def smooth(self, data, inputs=None, mask=None):
-        self.add_data(data, inputs=inputs, mask=mask, generate=False)
+        self.add_data(data, inputs=inputs, mask=mask)
         s = self.states_list.pop()
         return s.smooth()
 
@@ -71,10 +67,10 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, inputs=None, mask=None, states_noise=True, obs_noise=True):
-        self.add_data(data, mask=mask, generate=False)
+    def sample_predictions(self, data, Tpred, inputs_pred=None, inputs=None, mask=None, states_noise=True, obs_noise=True):
+        self.add_data(data, inputs=inputs, mask=mask)
         s = self.states_list.pop()
-        return s.sample_predictions(Tpred, inputs=inputs, states_noise=states_noise, obs_noise=obs_noise)
+        return s.sample_predictions(Tpred, inputs=inputs_pred, states_noise=states_noise, obs_noise=obs_noise)
 
     # convenience properties
 
@@ -185,9 +181,7 @@ class _LDSBase(Model):
 
     @property
     def has_missing_data(self):
-        m = [isinstance(s, LDSStatesMissingData) for s in self.states_list]
-        assert all(m) or (not any(m))
-        return all(m)
+        return any([s.mask is not None for s in self.states_list])
 
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
@@ -205,10 +199,11 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
     def resample_dynamics_distn(self):
         self.dynamics_distn.resample(
-            [np.hstack((s.stateseq[:-1],s.inputs[:-1],s.stateseq[1:])) for s in self.states_list])
+            [np.hstack((s.gaussian_states[:-1],s.inputs[:-1],s.gaussian_states[1:]))
+             for s in self.states_list])
 
     def resample_emission_distn(self):
-        xys = [(np.hstack((s.stateseq, s.inputs)), s.data) for s in self.states_list]
+        xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
         # Provide a mask if necessary
         if self.has_missing_data:
             masks = [s.mask for s in self.states_list]
@@ -288,7 +283,7 @@ class _LDSMeanFieldSVI(_LDSBase, ModelMeanFieldSVI):
             (masks if isinstance(masks, list) else [masks])
 
         def get_states(data, mask):
-            self.add_data(data, mask=mask, generate=False, **kwargs)
+            self.add_data(data, mask=mask, **kwargs)
             return self.states_list.pop()
 
         return [get_states(data, mask) for data, mask in zip(minibatch, masks)]
@@ -301,7 +296,7 @@ class _NonstationaryLDSGibbsSampling(_LDSGibbsSampling):
 
     def resample_init_dynamics_distn(self):
         self.init_dynamics_distn.resample(
-            [s.stateseq[0] for s in self.states_list])
+            [s.gaussian_states[0] for s in self.states_list])
 
 
 class _LDSEM(_LDSBase, ModelEM):
@@ -356,7 +351,7 @@ class NonstationaryLDS(
 
     def resample_init_dynamics_distn(self):
         self.init_dynamics_distn.resample(
-            [s.stateseq[0] for s in self.states_list])
+            [s.gaussian_states[0] for s in self.states_list])
 
     # convenience properties
 

@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 
 from pybasicbayes.distributions import Regression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
-from autoregressive.distributions import AutoRegression
 
 from pylds.models import LDS, DefaultLDS
 
@@ -32,7 +31,7 @@ sigma_obs = 0.01*np.eye(D_obs)
 ###################
 
 truemodel = LDS(
-    dynamics_distn=AutoRegression(A=A,sigma=sigma_states),
+    dynamics_distn=Regression(A=A,sigma=sigma_states),
     emission_distn=DiagonalRegression(D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
 
 data, stateseq = truemodel.generate(2000)
@@ -47,7 +46,7 @@ def update(model):
     return model.log_likelihood()
 
 diag_model = LDS(
-    dynamics_distn=AutoRegression(
+    dynamics_distn=Regression(
             nu_0=D_latent+3,
             S_0=D_latent*np.eye(D_latent),
             M_0=np.zeros((D_latent, D_latent)),

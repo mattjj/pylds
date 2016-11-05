@@ -3,10 +3,10 @@ import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import Regression, AutoRegression
+from pybasicbayes.distributions import Regression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import LDS, DefaultLDS
+from pylds.models import LDS
 
 npr.seed(0)
 
@@ -103,15 +103,16 @@ plt.ylabel("Smoothed Data")
 
 Nseed = 1700
 Npredict = 100
-prediction_seed = data[:Nseed]
+given_data= data[:Nseed]
+given_inputs = inputs[:Nseed]
 
 input_preds = \
     input_model.sample_predictions(
-        prediction_seed, Npredict,
-        inputs=inputs[Nseed:Nseed+Npredict])
+        given_data, inputs=given_inputs,
+        Tpred=Npredict, inputs_pred=inputs[Nseed:Nseed + Npredict])
 noinput_preds = \
     noinput_model.sample_predictions(
-        prediction_seed, Npredict)
+        given_data, Tpred=Npredict)
 
 plt.figure()
 plt.plot(data, 'b-')

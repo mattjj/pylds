@@ -3,7 +3,7 @@ import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import AutoRegression, DiagonalRegression
+from pybasicbayes.distributions import Regression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
 
 from pylds.models import LDS
@@ -38,7 +38,7 @@ sigma_obs = 0.1 * np.eye(D_obs)
 ###################
 
 truemodel = LDS(
-    dynamics_distn=AutoRegression(A=A,sigma=sigma_states),
+    dynamics_distn=Regression(A=A,sigma=sigma_states),
     emission_distn=DiagonalRegression(D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
 
 truemodel.mu_init = mu_init
@@ -61,7 +61,7 @@ for i,offset in enumerate(range(0,T,chunksz)):
 #  make model #
 ###############
 model = LDS(
-    dynamics_distn=AutoRegression(
+    dynamics_distn=Regression(
             nu_0=D_latent+3,
             S_0=D_latent*np.eye(D_latent),
             M_0=np.zeros((D_latent, D_latent)),
@@ -133,7 +133,7 @@ plt.ylabel("sigma_obs")
 
 plt.figure()
 plt.plot(lls,'-b')
-plt.plot([0,N_samples], truemodel.log_likelihood(data, mask) * np.ones(2), '-k')
+plt.plot([0,N_samples], truemodel.log_likelihood(data, mask=mask) * np.ones(2), '-k')
 plt.xlabel('iteration')
 plt.ylabel('log likelihood')
 
@@ -142,7 +142,7 @@ plt.ylabel('log likelihood')
 #  smoothing   #
 ################
 smoothed_obs = model.states_list[0].smooth()
-sample_predictive_obs = model.states_list[0].stateseq.dot(model.C.T)
+sample_predictive_obs = model.states_list[0].gaussian_states.dot(model.C.T)
 
 plt.figure()
 given_data = data.copy()

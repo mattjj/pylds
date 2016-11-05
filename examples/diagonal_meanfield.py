@@ -3,7 +3,7 @@ import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import Regression, AutoRegression, DiagonalRegression
+from pybasicbayes.distributions import Regression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
 
 from pylds.models import LDS, DefaultLDS
@@ -31,7 +31,7 @@ sigma_obs = 0.01*np.eye(1)
 ###################
 
 truemodel = LDS(
-    dynamics_distn=AutoRegression(
+    dynamics_distn=Regression(
             A=A,sigma=sigma_states),
     emission_distn=DiagonalRegression(
             D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
@@ -43,7 +43,7 @@ data, stateseq = truemodel.generate(2000)
 #  fit model  #
 ###############
 model = LDS(
-    dynamics_distn=AutoRegression(
+    dynamics_distn=Regression(
             nu_0=D_latent+1,
             S_0=D_latent*np.eye(D_latent),
             M_0=np.zeros((D_latent, D_latent)),
