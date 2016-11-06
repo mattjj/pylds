@@ -207,12 +207,12 @@ class _LDSStates(object):
         C = self.C
         D = self.D
         R = self.sigma_obs
-        RC = np.linalg.solve(R, C)
-        J_node = C.T.dot(RC)
+        RinvC = np.linalg.solve(R, C)
+        J_node = C.T.dot(RinvC)
 
         # TODO: Faster to replace this with a loop?
         # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
-        h_node = (self.data - self.inputs.dot(D.T)).dot(RC)
+        h_node = (self.data - self.inputs.dot(D.T)).dot(RinvC)
 
         return J_node, h_node
 
@@ -411,14 +411,14 @@ class _LDSStatesMeanField(_LDSStates):
 
         # Compute E[B^T Q^{-1}] and E[B^T Q^{-1} A]
         n = self.D_latent
-        E_Qinv = J_pair_22
-        E_AT_Qinv = J_pair_21[:,:n].T
-        E_BT_Qinv = J_pair_21[:,n:].T
-        E_BT_Qinv_A = J_pair_11[n:,:n]
+        E_Qinv = J_pair_22.copy("C")
+        E_AT_Qinv = (J_pair_21[:,:n].T).copy("C")
+        E_BT_Qinv = (J_pair_21[:,n:].T).copy("C")
+        E_BT_Qinv_A = J_pair_11[n:,:n].copy("C")
         E_AT_Qinv_A = J_pair_11[:n,:n].copy("C")
 
-        h_pair_1 = -self.inputs.dot(E_BT_Qinv_A)
-        h_pair_2 = self.inputs.dot(E_BT_Qinv)
+        h_pair_1 = (-self.inputs.dot(E_BT_Qinv_A)).copy("C")
+        h_pair_2 = (self.inputs.dot(E_BT_Qinv)).copy("C")
 
         return E_AT_Qinv_A, -E_AT_Qinv, E_Qinv, h_pair_1, h_pair_2
 
@@ -438,7 +438,7 @@ class _LDSStatesMeanField(_LDSStates):
 
         n = self.D_latent
         E_Rinv_C = J_yx[:,:n].copy("C")
-        E_DT_Rinv_C = J_node[n:,:n]
+        E_DT_Rinv_C = (J_node[n:,:n]).copy("C")
         E_CT_Rinv_C = J_node[:n,:n].copy("C")
 
         h_node = self.data.dot(E_Rinv_C)
@@ -490,8 +490,12 @@ class _LDSStatesMeanField(_LDSStates):
         return self._mf_lds_normalizer
 
     def meanfield_smooth(self):
-        E_C, _, _, _ = self.emission_distn.mf_expectations
-        return self.smoothed_mus.dot(E_C.T)
+        if self.diagonal_noise:
+            E_C, _, _, _ = self.emission_distn.mf_expectations
+        else:
+            ed = self.emission_distn
+            _,_,E_C,_ = ed._natural_to_standard(ed.mf_natural_hypparam)
+        return np.hstack((self.smoothed_mus, self.inputs)).dot(E_C.T)
 
 
 class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):

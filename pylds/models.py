@@ -227,7 +227,7 @@ class _LDSMeanField(_LDSBase, ModelMeanField):
             s.meanfieldupdate()
 
     def meanfield_update_parameters(self):
-        # self.meanfield_update_dynamics_distn()
+        self.meanfield_update_dynamics_distn()
         self.meanfield_update_emission_distn()
 
     def meanfield_update_dynamics_distn(self):

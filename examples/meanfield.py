@@ -40,6 +40,7 @@ truemodel = LDS(
     emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
 
 inputs = np.random.randn(T, D_input)
+# inputs = np.zeros((T, D_input))
 data, stateseq = truemodel.generate(T, inputs=inputs)
 
 
@@ -47,11 +48,22 @@ data, stateseq = truemodel.generate(T, inputs=inputs)
 # make model  #
 ###############
 model = LDS(
-    dynamics_distn=Regression(nu_0=D_latent + 2, S_0=D_latent * np.eye(D_latent),
-                              M_0=np.zeros((D_latent, D_latent + D_input)), K_0=(D_latent + D_input) * np.eye(D_latent + D_input)),
-    emission_distn=Regression(nu_0=D_obs + 1, S_0=D_obs * np.eye(D_obs),
-                              M_0=np.zeros((D_obs, D_latent + D_input)), K_0=(D_latent + D_input) * np.eye(D_latent + D_input)))
+    dynamics_distn=Regression(nu_0=D_latent + 2,
+                              S_0=D_latent * np.eye(D_latent),
+                              M_0=np.zeros((D_latent, D_latent + D_input)),
+                              K_0=(D_latent + D_input) * np.eye(D_latent + D_input),
+                              # A=np.hstack((A,B)), sigma=sigma_states
+                              ),
+    emission_distn=Regression(nu_0=D_obs + 2,
+                              S_0=D_obs * np.eye(D_obs),
+                              M_0=np.zeros((D_obs, D_latent + D_input)),
+                              K_0=(D_latent + D_input) * np.eye(D_latent + D_input),
+                              # A=np.hstack((C,D)), sigma=100*sigma_obs
+                              )
+    )
 model.add_data(data, inputs=inputs)
+# model.emission_distn._initialize_mean_field()
+# model.dynamics_distn._initialize_mean_field()
 
 ###############
 #  fit model  #
@@ -76,8 +88,7 @@ plt.show()
 ################
 #  smoothing   #
 ################
-E_C, E_D = model.C, model.D
-smoothed_obs = model.states_list[0].smoothed_mus.dot(E_C.T) + inputs.dot(E_D.T)
+smoothed_obs = model.states_list[0].meanfield_smooth()
 
 ################
 #  predicting  #
