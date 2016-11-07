@@ -75,23 +75,23 @@ class _LDSBase(Model):
     # convenience properties
 
     @property
-    def n(self):
+    def D_latent(self):
         'latent dimension'
         return self.dynamics_distn.D_out
 
     @property
-    def p(self):
+    def D_obs(self):
         'emission dimension'
         return self.emission_distn.D_out
 
     @property
-    def d(self):
+    def D_input(self):
         'input dimension'
         return self.dynamics_distn.D_in - self.dynamics_distn.D_out
 
     @property
     def mu_init(self):
-        return np.zeros(self.n) if not hasattr(self,'_mu_init') \
+        return np.zeros(self.D_latent) if not hasattr(self, '_mu_init') \
             else self._mu_init
 
     @mu_init.setter
@@ -108,8 +108,8 @@ class _LDSBase(Model):
             return dtlyap(self.A, self.sigma_states)
         except ImportError:
             return np.linalg.solve(
-                np.eye(self.n**2) - np.kron(self.A,self.A), self.sigma_states.ravel())\
-                .reshape(self.n,self.n)
+                np.eye(self.D_latent ** 2) - np.kron(self.A, self.A), self.sigma_states.ravel())\
+                .reshape(self.D_latent, self.D_latent)
 
     @sigma_init.setter
     def sigma_init(self,sigma_init):
@@ -117,19 +117,19 @@ class _LDSBase(Model):
 
     @property
     def A(self):
-        return self.dynamics_distn.A[:,:self.n].copy("C")
+        return self.dynamics_distn.A[:, :self.D_latent].copy("C")
 
     @A.setter
     def A(self,A):
-        self.dynamics_distn.A[:,:self.n] = A
+        self.dynamics_distn.A[:, :self.D_latent] = A
 
     @property
     def B(self):
-        return self.dynamics_distn.A[:, self.n:].copy("C")
+        return self.dynamics_distn.A[:, self.D_latent:].copy("C")
 
     @B.setter
     def B(self, B):
-        self.dynamics_distn.A[:, self.n:] = B
+        self.dynamics_distn.A[:, self.D_latent:] = B
 
     @property
     def sigma_states(self):
@@ -141,19 +141,19 @@ class _LDSBase(Model):
 
     @property
     def C(self):
-        return self.emission_distn.A[:,:self.n].copy("C")
+        return self.emission_distn.A[:, :self.D_latent].copy("C")
 
     @C.setter
     def C(self,C):
-        self.emission_distn.A[:,:self.n] = C
+        self.emission_distn.A[:, :self.D_latent] = C
 
     @property
     def D(self):
-        return self.emission_distn.A[:, self.n:].copy("C")
+        return self.emission_distn.A[:, self.D_latent:].copy("C")
 
     @D.setter
     def D(self, D):
-        self.emission_distn.A[:, self.n:] = D
+        self.emission_distn.A[:, self.D_latent:] = D
 
     @property
     def sigma_obs(self):
@@ -373,23 +373,50 @@ class NonstationaryLDS(
 ##############################
 
 # TODO make data-dependent default constructors
-# TODO make a constructor that takes A, B, C, D
 
 from pybasicbayes.distributions import Regression
 
-
-def DefaultLDS(n, p, d=0):
+def DefaultLDS(D_obs, D_latent, D_input=0,
+               mu_init=None, sigma_init=None,
+               A=None, B=None, sigma_states=None,
+               C=None, D=None, sigma_obs=None):
     model = LDS(
         dynamics_distn=Regression(
-            nu_0=n+1, S_0=n*np.eye(n), M_0=np.zeros((n, n+d)), K_0=n*np.eye(n+d)),
+            nu_0=D_latent + 1,
+            S_0=D_latent * np.eye(D_latent),
+            M_0=np.zeros((D_latent, D_latent + D_input)),
+            K_0=D_latent * np.eye(D_latent + D_input)),
         emission_distn=Regression(
-            nu_0=p+1, S_0=p*np.eye(p), M_0=np.zeros((p, n+d)), K_0=p*np.eye(n+d)))
+            nu_0=D_obs + 1,
+            S_0=D_obs * np.eye(D_obs),
+            M_0=np.zeros((D_obs, D_latent + D_input)),
+            K_0=D_obs * np.eye(D_latent + D_input)))
 
-    model.A = 0.99*np.eye(n)
-    model.B = 0.1 * np.random.randn(n,d)
-    model.sigma_states = np.eye(n)
-    model.C = np.random.randn(p, n)
-    model.D = np.random.randn(p, d)
-    model.sigma_obs = 0.1*np.eye(p)
+    set_default = \
+        lambda prm, val, default: \
+            model.__setattr__(prm, val if val is not None else default)
+
+    set_default("mu_init", mu_init, np.zeros(D_latent))
+    set_default("sigma_init", sigma_init, np.eye(D_latent))
+
+    set_default("A", A, 0.99 * random_rotation(D_latent))
+    set_default("B", B, 0.1 * np.random.randn(D_latent, D_input))
+    set_default("sigma_states", sigma_states, 0.1 * np.eye(D_latent))
+
+    set_default("C", C, np.random.randn(D_obs, D_latent))
+    set_default("D", D, 0.1 * np.random.randn(D_obs, D_input))
+    set_default("sigma_obs", sigma_obs, 0.1 * np.eye(D_obs))
 
     return model
+
+def random_rotation(n, theta=None):
+    if theta is None:
+        # Sample a random, slow rotation
+        theta = 0.5 * np.pi * np.random.rand()
+
+    rot = np.array([[np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta), np.cos(theta)]])
+    out = np.zeros((n, n))
+    out[:2, :2] = rot
+    q = np.linalg.qr(np.random.randn(n, n))[0]
+    return q.dot(out).dot(q.T)

@@ -6,45 +6,17 @@ import matplotlib.pyplot as plt
 from pybasicbayes.distributions import Regression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import LDS
+from pylds.models import DefaultLDS, LDS
 
 npr.seed(0)
 
-#########################
-#  set some parameters  #
-#########################
-D_obs, D_latent = 4, 4
-mu_init = np.zeros(D_latent)
-mu_init[0] = 1.0
-sigma_init = 0.01*np.eye(D_latent)
-
-def random_rotation(n,theta):
-    rot = np.array([[np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]])
-    out = np.zeros((n,n))
-    out[:2,:2] = rot
-    q = np.linalg.qr(np.random.randn(n,n))[0]
-    return q.dot(out).dot(q.T)
-
-A = random_rotation(D_latent, np.pi/24.)
-sigma_states = 0.01*np.eye(D_latent)
-
-C = np.random.randn(D_obs, D_latent)
-sigma_obs = 0.1 * np.eye(D_obs)
-
-
-###################
-#  generate data  #
-###################
-
-truemodel = LDS(
-    dynamics_distn=Regression(A=A,sigma=sigma_states),
-    emission_distn=DiagonalRegression(D_obs, D_latent, A=C, sigmasq=np.diag(sigma_obs)))
-
-truemodel.mu_init = mu_init
-truemodel.sigma_init = sigma_init
-
+# Model parameters
+D_obs = 4
+D_latent = 4
 T = 1000
+
+# Simulate from an LDS
+truemodel = DefaultLDS(D_obs, D_latent)
 data, stateseq = truemodel.generate(T)
 
 # Mask off a chunk of data
@@ -57,9 +29,7 @@ for i,offset in enumerate(range(0,T,chunksz)):
     if j == D_obs:
         mask[offset:min(offset+chunksz, T), :] = False
 
-###############
-#  make model #
-###############
+# Fit with another LDS
 model = LDS(
     dynamics_distn=Regression(
             nu_0=D_latent+3,
@@ -70,9 +40,7 @@ model = LDS(
 model.add_data(data=data, mask=mask)
 
 
-###############
-#  fit model  #
-###############
+# Fit the model
 N_samples = 500
 sigma_obs_smpls = []
 def gibbs_update(model):
@@ -122,25 +90,20 @@ lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
 # # [model.resample_model() for _ in progprint_xrange(100)]
 # lls = [svi_update(model, stepsizes[itr], minibatchsize) for itr in progprint_xrange(N_samples)]
 
-
-################
-# likelihoods  #
-################
-plt.figure()
-plt.plot(sigma_obs_smpls)
-plt.xlabel("iteration")
-plt.ylabel("sigma_obs")
-
+# Plot the log likelihood
 plt.figure()
 plt.plot(lls,'-b')
 plt.plot([0,N_samples], truemodel.log_likelihood(data, mask=mask) * np.ones(2), '-k')
 plt.xlabel('iteration')
 plt.ylabel('log likelihood')
 
+# Plot the inferred observation noise
+plt.figure()
+plt.plot(sigma_obs_smpls)
+plt.xlabel("iteration")
+plt.ylabel("sigma_obs")
 
-################
-#  smoothing   #
-################
+# Smooth over missing data
 smoothed_obs = model.states_list[0].smooth()
 sample_predictive_obs = model.states_list[0].gaussian_states.dot(model.C.T)
 
@@ -159,7 +122,6 @@ for i in range(N_subplots):
     plt.plot(given_data[:,i], 'k', label="observed")
     plt.plot(masked_data[:,i], ':k', label="masked")
     plt.plot(smoothed_obs[:,i], 'b', lw=2, label="smoothed")
-    # plt.plot(sample_predictive_obs, ':b', label="sample")
 
     plt.imshow(1-mask[:,i][None,:],cmap="Greys",alpha=0.25,extent=(0,T) + ylims, aspect="auto")
 
@@ -172,24 +134,6 @@ for i in range(N_subplots):
     plt.ylabel("$x_%d(t)$" % (i+1))
     plt.ylim(ylims)
     plt.xlim(xlims)
-# plt.savefig("missing_data_ex_lownoise.png")
-
-################
-#  predicting  #
-################
-# Nseed = 1700
-# Npredict = 100
-# prediction_seed = data[:Nseed]
-#
-# preds = model.sample_predictions(
-#     prediction_seed, Npredict, obs_noise=False)
-#
-# plt.figure()
-# plt.plot(given_data, 'k', label="observed")
-# plt.plot(masked_data, ':k', label="masked")
-# plt.plot(Nseed + np.arange(Npredict), preds, 'b')
-# plt.xlabel('time index')
-# plt.ylabel('prediction')
 
 plt.show()
 

@@ -44,7 +44,7 @@ def random_rotation(n,theta):
 
 
 def lds_to_dense_infoparams(model,data,inputs):
-    T, n = data.shape[0], model.n
+    T, n = data.shape[0], model.D_latent
 
     mu_init, sigma_init = model.mu_init, model.sigma_init
     A, B, sigma_states = model.A, model.B,  model.sigma_states
@@ -76,7 +76,7 @@ def lds_to_dense_infoparams(model,data,inputs):
 
 def same_means(model, Jh):
     J,h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     dense_mu = np.linalg.solve(J,h).reshape((T,n))
 
@@ -88,7 +88,7 @@ def same_means(model, Jh):
 
 def same_marginal_covs(model, Jh):
     J, h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)
     dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n]
@@ -102,7 +102,7 @@ def same_marginal_covs(model, Jh):
 
 def same_pairwise_secondmoments(model, Jh):
     J, h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)
     dense_mu = np.linalg.solve(J,h)

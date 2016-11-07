@@ -57,15 +57,19 @@ if use_cython:
 setup(
     name='pylds',
     version='0.0.2',
-    description="Learning and inference for Gaussian linear dynamical systems"
+    description="Learning and inference for linear dynamical systems"
     "with fast Cython and BLAS/LAPACK implementations",
-    author='Matthew James Johnson',
+    author='Matthew James Johnson and Scott W Linderman',
     author_email='mattjj@csail.mit.edu',
     license="MIT",
     url='https://github.com/mattjj/pylds',
     packages=['pylds'],
     install_requires=[
-        'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib', 'pybasicbayes'],
+        'numpy>=1.9.3',
+        'scipy>=0.16',
+        'matplotlib',
+        'pybasicbayes',
+        'pypolyagamma>=1.1'],
     ext_modules=ext_modules,
     classifiers=[
         'Intended Audience :: Science/Research',

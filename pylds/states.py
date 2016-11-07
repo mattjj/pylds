@@ -548,11 +548,11 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         data, inputs, mask = self.data, self.inputs, self.mask
 
         C, D, R = self.C, self.D, self.sigma_obs
-        Rinv = np.linang.inv(R)
+        Rinv = np.linalg.inv(R)
 
         # Sloowwwwww
         J_node = np.zeros((T, D_latent, D_latent))
-        h_node = np.zeros((T, D_latent, D_latent))
+        h_node = np.zeros((T, D_latent))
         for t in range(T):
             Rinv_t = Rinv * np.outer(mask[t], mask[t])
             J_node[t] = C.T.dot(Rinv_t).dot(C)
