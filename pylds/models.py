@@ -6,7 +6,7 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from pylds.states import LDSStates
+from pylds.states import LDSStates, LaplaceApproxPoissonLDSStates
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence
@@ -367,6 +367,78 @@ class NonstationaryLDS(
     def sigma_init(self, sigma_init):
         self.init_dynamics_distn.sigma = sigma_init
 
+class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
+
+    @property
+    def d(self):
+        return self.emission_distn.b
+
+    @d.setter
+    def d(self, value):
+        self.emission_distn.b = value
+
+    def mode_log_likelihood(self):
+        return sum(s.mode_log_likelihood() for s in self.states_list)
+
+    def heldout_log_likelihood(self):
+        return sum(s.heldout_log_likelihood() for s in self.states_list)
+
+    def mode_heldout_log_likelihood(self):
+        return sum(s.mode_heldout_log_likelihood() for s in self.states_list)
+
+    def add_data(self, data, mask=None, **kwargs):
+        assert isinstance(data, np.ndarray) and data.ndim == 2 and data.shape[1] == self.D_obs
+        states = LaplaceApproxPoissonLDSStates(model=self, data=data, T=data.shape[0], **kwargs)
+        self.states_list.append(states)
+
+    def M_step(self):
+        self.M_step_init_dynamics_distn()
+        super(LaplaceApproxPoissonLDS, self).M_step()
+
+    def M_step_init_dynamics_distn(self):
+        pass
+        # TODO: This is a bug in PYLDS
+        # self.init_dynamics_distn.max_likelihood(
+        #     stats=(sum(s.E_x1_x1 for s in self.states_list)))
+
+    def M_step_emission_distn(self):
+        self.emission_distn.max_likelihood(
+            stats=[s.E_emission_stats for s in self.states_list])
+
+    def expected_log_likelihood(self):
+        return sum([s.expected_log_likelihood() for s in self.states_list])
+
+    # def initialize_with_pca(self, init_model=None, N_iter=100):
+    #     from pglds.models import ApproxPoissonPCA
+    #     from pybasicbayes.util.text import progprint_xrange
+    #
+    #     ### Initialize with PCA
+    #     if init_model is None:
+    #         init_model = ApproxPoissonPCA(self.N, self.D_latent)
+    #
+    #         for states in self.states_list:
+    #             init_model.add_data(states.data.X, states.data.mask)
+    #
+    #         print("Initializing with PCA")
+    #         [init_model.resample_model() for _ in progprint_xrange(N_iter)]
+    #
+    #     C0 = init_model.C
+    #     b0 = init_model.emission_distn.b
+    #
+    #     self.init_dynamics_distn.mu = np.zeros(self.D_latent)
+    #     self.init_dynamics_distn.sigma = np.eye(self.D_latent)
+    #     self.emission_distn.C = C0.copy()
+    #     self.emission_distn.b = b0.copy()
+    #
+    #     for states, pca_states in zip(self.states_list, init_model.states_list):
+    #         states.stateseq = pca_states.gaussian_states.copy()
+    #
+    #     if hasattr(init_model, 'A'):
+    #         self.dynamics_distn.A = init_model.A.copy()
+    #         self.dynamics_distn.sigma = init_model.sigma_states.copy()
+    #
+    #         # self.resample_dynamics_distns()
+
 
 ##############################
 #  convenience constructors  #
@@ -375,6 +447,19 @@ class NonstationaryLDS(
 # TODO make data-dependent default constructors
 
 from pybasicbayes.distributions import Regression
+
+
+def random_rotation(n, theta=None):
+    if theta is None:
+        # Sample a random, slow rotation
+        theta = 0.5 * np.pi * np.random.rand()
+
+    rot = np.array([[np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta), np.cos(theta)]])
+    out = np.zeros((n, n))
+    out[:2, :2] = rot
+    q = np.linalg.qr(np.random.randn(n, n))[0]
+    return q.dot(out).dot(q.T)
 
 def DefaultLDS(D_obs, D_latent, D_input=0,
                mu_init=None, sigma_init=None,
@@ -409,14 +494,39 @@ def DefaultLDS(D_obs, D_latent, D_input=0,
 
     return model
 
-def random_rotation(n, theta=None):
-    if theta is None:
-        # Sample a random, slow rotation
-        theta = 0.5 * np.pi * np.random.rand()
 
-    rot = np.array([[np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]])
-    out = np.zeros((n, n))
-    out[:2, :2] = rot
-    q = np.linalg.qr(np.random.randn(n, n))[0]
-    return q.dot(out).dot(q.T)
+from pybasicbayes.distributions import Gaussian
+from pylds.distributions import PoissonRegression
+
+def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
+                      mu_init=None, sigma_init=None,
+                      A=None, B=None, sigma_states=None,
+                      C=None, d=None,
+                      ):
+    assert D_input == 0, "Inputs are not yet supported for Poisson LDS"
+    model = LaplaceApproxPoissonLDS(
+        init_dynamics_distn=
+            Gaussian(mu_0=np.zeros(D_latent), sigma_0=np.eye(D_latent),
+                     kappa_0=1.0, nu_0=D_latent + 1),
+        dynamics_distn=
+            Regression(A=0.9 * np.eye(D_latent), sigma=np.eye(D_latent),
+                       nu_0=D_latent + 1, S_0=D_latent * np.eye(D_latent),
+                       M_0=np.zeros((D_latent, D_latent)), K_0=D_latent * np.eye(D_latent)),
+        emission_distn=
+            PoissonRegression(D_obs, D_latent, verbose=False))
+
+    set_default = \
+        lambda prm, val, default: \
+            model.__setattr__(prm, val if val is not None else default)
+
+    set_default("mu_init", mu_init, np.zeros(D_latent))
+    set_default("sigma_init", sigma_init, np.eye(D_latent))
+
+    set_default("A", A, 0.99 * random_rotation(D_latent))
+    set_default("B", B, 0.1 * np.random.randn(D_latent, D_input))
+    set_default("sigma_states", sigma_states, 0.1 * np.eye(D_latent))
+
+    set_default("C", C, np.random.randn(D_obs, D_latent))
+    set_default("d", d, np.zeros((D_obs, 1)))
+
+    return model
