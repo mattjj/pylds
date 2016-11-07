@@ -35,9 +35,9 @@ data, stateseq = true_model.generate(T, inputs=inputs)
 true_ll = true_model.log_likelihood() 
 ```
 The `DefaultLDS` constructor initializes an LDS with a
-random rotational dynamics matrix. The outputs are `data` -
-a `T x D_obs` matrix - and `stateseq` - a `T x D_latent` matrix
-of latent states. 
+random rotational dynamics matrix. The outputs are `data`, a `T x D_obs` 
+matrix of observations, and `stateseq`, a `T x D_latent` matrix
+of latent states.
 
 Now create another LDS and try to infer the latent states and
 learn the parameters given the observed data. 
@@ -82,8 +82,9 @@ plt.xlabel("Time")
 plt.xlim(0, 500)
 plt.ylabel("Smoothed Data")
 plt.legend(loc="upper center", ncol=2)
-![Smoothed Data](aux/demo_smooth.png)
 ```
+
+![Smoothed Data](aux/demo_smooth.png)
 
 Check out the [examples](/examples) directory for demos of other
 types of inference, as well as examples of how to work with count
