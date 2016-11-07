@@ -727,17 +727,22 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         Q = self.sigma_states
         logdet_pair = -np.linalg.slogdet(Q)[1]
 
+        # We need terms for u_t B^T Q^{-1} B u
+        B = self.B
+        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
+
         # TODO: Observations
         warn("extra_info_params not implemented for count data. "
              "Log likelihood calculations will be wrong.")
         J_yy = np.zeros((self.D_emission, self.D_emission))
         logdet_node = np.zeros((self.T))
+        hJh_node = np.zeros((self.D_input, self.D_input))
 
         masked_data = self.data * self.mask \
             if self.mask is not None \
             else self.data
 
-        return J_init, h_init, logdet_pair, J_yy, logdet_node, masked_data
+        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, masked_data
 
     @property
     def expected_info_emission_params(self):
