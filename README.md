@@ -48,7 +48,7 @@ test_model = DefaultLDS(D_obs, D_latent, D_input)
 test_model.add_data(data)
 
 # Run the Gibbs sampler
-N_samples
+N_samples = 100
 def update(model):
     model.resample_model()
     return model.log_likelihood()
