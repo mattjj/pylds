@@ -412,12 +412,28 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
         return s.data
 
     def resample_emission_distn(self):
-        xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
-        mask = [s.mask for s in self.states_list] if self.has_missing_data else None
-        omega = [s.omega for s in self.states_list] if self.has_count_data else None
+        """
+        Now for the expensive part... the data is stored in a sparse row
+        format, which is good for updating the latent states (since we
+        primarily rely on dot products with the data, which can be
+        efficiently performed for CSR matrices).
 
-        if self.has_count_data:
-            self.emission_distn.resample(data=xys, mask=mask, omega=omega)
+        However, in order to update the n-th row of the emission matrix,
+        we need to know which counts are observed in the n-th column of data.
+
+        :return:
+        """
+        masked_datas = [s.masked_data.tocsc() for s in self.states_list]
+        xs = [np.hstack((s.gaussian_states, s.inputs))for s in self.states_list]
+
+        for n in range(self.D_obs):
+            # Get the nonzero values of the nth column
+            rowns = [md.indices[md.indptr[n]:md.indptr[n+1]] for md in masked_datas]
+            xns = [x[r] for x,r in zip(xs, rowns)]
+            yns = [s.masked_data.getcol(n).data for s in self.states_list]
+            maskns = [np.ones_like(y, dtype=bool) for y in yns]
+            omegans = [s.omega.getcol(n).data for s in self.states_list]
+            self.emission_distn._resample_row_of_emission_matrix(n, xns, yns, maskns, omegans)
 
 
 class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):

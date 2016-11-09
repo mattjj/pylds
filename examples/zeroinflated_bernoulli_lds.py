@@ -55,46 +55,44 @@ model.add_data(data, inputs=inputs)
 N_samples = 5
 def gibbs_update(model):
     model.resample_model()
-    smoothed_obs = model.states_list[0].smooth()
     return model.log_likelihood(), \
-           model.states_list[0].gaussian_states, \
-           smoothed_obs
+           model.states_list[0].gaussian_states
 
-lls, z_smpls, smoothed_obss = \
+lls, z_smpls = \
     zip(*[gibbs_update(model) for _ in progprint_xrange(N_samples)])
 
 # Plot the log likelihood over iterations
-plt.figure(figsize=(10,6))
-plt.plot(lls,'-b')
-plt.plot([0,N_samples], truemodel.log_likelihood() * np.ones(2), '-k')
-plt.xlabel('iteration')
-plt.ylabel('log likelihood')
+# plt.figure(figsize=(10,6))
+# plt.plot(lls,'-b')
+# plt.plot([0,N_samples], truemodel.log_likelihood() * np.ones(2), '-k')
+# plt.xlabel('iteration')
+# plt.ylabel('log likelihood')
 
 # Plot the smoothed observations
-fig = plt.figure(figsize=(10,10))
-N_subplots = min(D_obs, 6)
-
-ylims = (-0.1, 1.1)
-xlims = (0, min(T,1000))
-
-n_to_plot = np.arange(min(N_subplots, D_obs))
-for i,j in enumerate(n_to_plot):
-    ax = fig.add_subplot(N_subplots,1,i+1)
-    # Plot spike counts
-    given_ts = np.where(data[:,j]==1)[0]
-    ax.plot(given_ts, np.ones_like(given_ts), 'ko', markersize=5)
-
-    # Plot the inferred rate
-    ax.plot([0], [0], 'b', lw=2, label="smoothed obs.")
-    ax.plot(smoothed_obss[-1][:,j], 'r', lw=2, label="smoothed pr.")
-
-    if i == 0:
-        plt.legend(loc="upper center", ncol=4, bbox_to_anchor=(0.5, 2.))
-    if i == N_subplots - 1:
-        plt.xlabel('time index')
-    ax.set_xlim(xlims)
-    ax.set_ylim(0, 1.1)
-    ax.set_ylabel("$x_%d(t)$" % (j+1))
-
-plt.show()
+# fig = plt.figure(figsize=(10,10))
+# N_subplots = min(D_obs, 6)
+#
+# ylims = (-0.1, 1.1)
+# xlims = (0, min(T,1000))
+#
+# n_to_plot = np.arange(min(N_subplots, D_obs))
+# for i,j in enumerate(n_to_plot):
+#     ax = fig.add_subplot(N_subplots,1,i+1)
+#     # Plot spike counts
+#     given_ts = np.where(data[:,j]==1)[0]
+#     ax.plot(given_ts, np.ones_like(given_ts), 'ko', markersize=5)
+#
+#     # Plot the inferred rate
+#     ax.plot([0], [0], 'b', lw=2, label="smoothed obs.")
+#     ax.plot(smoothed_obss[-1][:,j], 'r', lw=2, label="smoothed pr.")
+#
+#     if i == 0:
+#         plt.legend(loc="upper center", ncol=4, bbox_to_anchor=(0.5, 2.))
+#     if i == N_subplots - 1:
+#         plt.xlabel('time index')
+#     ax.set_xlim(xlims)
+#     ax.set_ylim(0, 1.1)
+#     ax.set_ylabel("$x_%d(t)$" % (j+1))
+#
+# plt.show()
 

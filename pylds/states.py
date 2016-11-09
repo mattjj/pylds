@@ -839,24 +839,24 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         # else:
         #     raise Exception("Invalid options. Must specify how states are initialized.")
 
+        # Initialize the Polya-gamma samplers
+        num_threads = ppg.get_omp_num_threads()
+        seeds = np.random.randint(2 ** 16, size=num_threads)
+        self.ppgs = [ppg.PyPolyaGamma(seed) for seed in seeds]
+
+        # Initialize the masked data
         if data is not None:
             assert isinstance(data, csr_matrix), "Data must be a sparse row matrix for zero-inflated models"
 
             # Initialize a mask -- in this case, the mask implements
             # the zero inflation
-            self.Z = csr_matrix((np.ones_like(data.data, dtype=bool),
-                                 data.indices,
-                                 data.indptr),
-                                shape=(self.data.shape))
+            self.masked_data = self.data.copy()
+            self.resample_auxiliary_variables()
         else:
-            self.Z = None
+            self.masked_data = None
+            self.omega = None
 
-        # Initialize the Polya-gamma samplers
-        num_threads = ppg.get_omp_num_threads()
-        seeds = np.random.randint(2 ** 16, size=num_threads)
-        self.ppgs = [ppg.PyPolyaGamma(seed) for seed in seeds]
-        self.omega = None
-        self.masked_data = None
+
 
     @property
     def rho(self):
@@ -902,9 +902,10 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         D = emission_distn.A[:,D_latent:]
         b = emission_distn.b
 
-        J_node = np.dot(omega, CCT)
+        J_node = omega.dot(CCT).reshape((T, D_latent, D_latent))
 
         kappa = emission_distn.kappa_func(masked_data.data)
+        kappa = csr_matrix((kappa, masked_data.indices, masked_data.indptr), shape=masked_data.shape)
         h_node = kappa.dot(C)
         # Unfortunately, the following would be dense arrays
         # h_node += -(omega * b.T).dot(C)
@@ -915,7 +916,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         for t in range(T):
             ns_t = masked_data.indices[masked_data.indptr[t]:masked_data.indptr[t+1]]
             om_t = omega.indices[omega.indptr[t]:omega.indptr[t+1]]
-            h_node[t] -= (om_t * b[ns_t]).dot(C[ns_t])
+            h_node[t] -= (om_t * b[ns_t][:,0]).dot(C[ns_t])
             h_node[t] -= (om_t * inputs[t].dot(D[ns_t].T)).dot(C[ns_t])
 
         return J_node, h_node
@@ -944,10 +945,10 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         #     else self.data
 
         # TODO: Fix this up
-        J_yy = 0
-        logdet_node = 0
-        hJh_node = 0
-        masked_data = 0
+        J_yy = np.zeros((self.D_emission, self.D_emission))
+        logdet_node = np.zeros((self.T))
+        hJh_node = np.zeros((self.D_input, self.D_input))
+        masked_data = np.zeros((self.T, self.D_emission))
 
         return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, masked_data
 
@@ -977,10 +978,46 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         return csr_matrix((psi, indices, indptr), shape=data.shape)
 
     def resample(self, niter=1):
-        import ipdb; ipdb.set_trace()
         self.resample_zeroinflation_variables()
-        self.resample_gaussian_states()
         self.resample_auxiliary_variables()
+        self.resample_gaussian_states()
+
+    def resample_zeroinflation_variables(self):
+        """
+        There's no way around the fact that we have to look at every
+        data point, even the zeros here.
+        """
+        T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
+        indptr = [0]
+        indices = []
+        vals = []
+        offset = 0
+        for t in range(T):
+            # Evaluate probability of data
+            x_t = np.concatenate((self.gaussian_states[t], self.inputs[t])).ravel()
+            y_t = np.array(self.data.getrow(t).todense()).ravel()
+            ll = self.emission_distn.log_likelihood((x_t, y_t)).ravel()
+
+            # Evaluate the probability that each emission was "exposed"
+            log_p_zero = np.log(self.rho) + ll
+            log_p_zero -= np.log(np.exp(log_p_zero) + (1-self.rho) * (y_t == 0))
+
+            # Sample zero inflation mask
+            z_t = np.random.rand(N) < np.exp(log_p_zero)
+
+            # Construct the sparse matrix
+            t_inds = np.where(z_t)[0]
+            indices.append(t_inds)
+            vals.append(y_t[t_inds])
+            offset += t_inds.size
+            indptr.append(offset)
+
+        # Construct a sparse matrix
+        vals = np.concatenate(vals)
+        indices = np.concatenate(indices)
+        indptr = np.array(indptr)
+        self.masked_data = csr_matrix((vals, indices, indptr), shape=(T, N))
+        print("Number exposed: ", vals.size)
 
     def resample_auxiliary_variables(self):
         T, C, D, ed = self.T, self.C, self.D, self.emission_distn
@@ -1005,38 +1042,6 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         ppg.pgdrawvpar(self.ppgs, b.data, psi.data, self.omega)
         self.omega = csr_matrix((self.omega, indices, indptr), shape=data.shape)
 
-    def resample_zeroinflation_variables(self):
-        """
-        There's no way around the fact that we have to look at every
-        data point, even the zeros here.
-        """
-        T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
-        indptr = [0]
-        indices = []
-        vals = []
-        offset = 0
-        for t in range(T):
-            # Evaluate probability of data
-            x_t = np.concatenate((self.gaussian_states[t], self.inputs[t]))
-            y_t = np.array(self.data.getrow(t).todense())
-            ll = self.emission_distn.log_likelihood((x_t, y_t))
-
-            # Evaluate the probability that each emission was "exposed"
-            log_p_zero = np.log(self.rho) + ll
-            log_p_zero -= np.log(np.exp(log_p_zero) + (1-self.rho) * (y_t == 0))
-
-            # Sample zero inflation mask
-            z_t = np.random.rand(N) < np.exp(log_p_zero)
-
-            # Construct the sparse matrix
-            t_inds = np.where(z_t)[0]
-            indices.append(t_inds)
-            vals.append(y_t[t_inds])
-            offset += t_inds.size
-            indptr.append(offset)
-
-        # Construct a sparse matrix
-        self.masked_data = csr_matrix((vals, indices, indptr), shape=(T, N))
 
     def smooth(self):
         # By assumption, the data is too large to construct
@@ -1086,25 +1091,25 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         else:
             return 0
 
-    def _monte_carlo_log_likelihood(self, N_samples=100):
-        from scipy.misc import logsumexp
-        zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
-        lls = np.zeros(N_samples)
-        for i, z in enumerate(zs):
-            psi = z.dot(self.C.T) + self.b.T
-            lls[i] = self.data.log_likelihood_given_activation(psi).sum()
-
-        return -np.log(N_samples) + logsumexp(lls)
-
-    def _monte_carlo_heldout_log_likelihood(self, N_samples=100):
-        from scipy.misc import logsumexp
-        zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
-        lls = np.zeros(N_samples)
-        for i, z in enumerate(zs):
-            psi = z.dot(self.C.T) + self.b.T
-            lls[i] = self.data.hll_given_activation(psi).sum()
-
-        return -np.log(N_samples) + logsumexp(lls)
+    # def _monte_carlo_log_likelihood(self, N_samples=100):
+    #     from scipy.misc import logsumexp
+    #     zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
+    #     lls = np.zeros(N_samples)
+    #     for i, z in enumerate(zs):
+    #         psi = z.dot(self.C.T) + self.b.T
+    #         lls[i] = self.data.log_likelihood_given_activation(psi).sum()
+    #
+    #     return -np.log(N_samples) + logsumexp(lls)
+    #
+    # def _monte_carlo_heldout_log_likelihood(self, N_samples=100):
+    #     from scipy.misc import logsumexp
+    #     zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
+    #     lls = np.zeros(N_samples)
+    #     for i, z in enumerate(zs):
+    #         psi = z.dot(self.C.T) + self.b.T
+    #         lls[i] = self.data.hll_given_activation(psi).sum()
+    #
+    #     return -np.log(N_samples) + logsumexp(lls)
 
     def expected_log_likelihood(self):
         ell = self.emission_distn.\
