@@ -36,14 +36,13 @@ data, stateseq = truemodel.generate(T)
 model = DefaultPoissonLDS(D_obs, D_latent)
 model.add_data(data, verbose=False)
 
-# Run a Gibbs sampler
-N_samples = 50
+N_iters = 50
 def em_update(model):
     model.EM_step()
     ll = model.log_likelihood()
     return ll
 
-lls = [em_update(model) for _ in progprint_xrange(N_samples)]
+lls = [em_update(model) for _ in progprint_xrange(N_iters)]
 
 # Plot the log likelihood over iterations
 plt.figure(figsize=(10,6))

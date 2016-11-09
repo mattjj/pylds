@@ -1,12 +1,13 @@
 from __future__ import division
 import numpy as np
+from scipy.sparse import csr_matrix
 
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField, ModelMeanFieldSVI
 
 from pybasicbayes.distributions import DiagonalRegression
 
-from pylds.states import LDSStates, LaplaceApproxPoissonLDSStates
+from pylds.states import LDSStates, LDSStatesZeroInflatedCountData, LaplaceApproxPoissonLDSStates
 
 # TODO make separate versions for stationary, nonstationary,
 # nonstationary-and-distinct-for-each-sequence
@@ -20,6 +21,9 @@ from pylds.states import LDSStates, LaplaceApproxPoissonLDSStates
 ######################
 
 class _LDSBase(Model):
+
+    _states_class = LDSStates
+
     def __init__(self,dynamics_distn,emission_distn):
         self.dynamics_distn = dynamics_distn
         self.emission_distn = emission_distn
@@ -27,7 +31,7 @@ class _LDSBase(Model):
 
     def add_data(self,data, inputs=None, mask=None, **kwargs):
         assert isinstance(data,np.ndarray)
-        self.states_list.append(LDSStates(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
+        self.states_list.append(self._states_class(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
         return self
 
     def log_likelihood(self, data=None, inputs=None, mask=None):
@@ -42,7 +46,7 @@ class _LDSBase(Model):
             return sum(s.log_likelihood() for s in self.states_list)
 
     def generate(self, T, inputs=None, keep=True):
-        s = LDSStates(model=self, T=T, inputs=inputs, initialize_from_prior=True)
+        s = self._states_class(model=self, T=T, inputs=inputs, initialize_from_prior=True)
         data = self._generate_obs(s, inputs)
         if keep:
             self.states_list.append(s)
@@ -183,6 +187,10 @@ class _LDSBase(Model):
     def has_missing_data(self):
         return any([s.mask is not None for s in self.states_list])
 
+    @property
+    def has_count_data(self):
+        return any([hasattr(s, "omega") and s.omega is not None for s in self.states_list])
+
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
     def resample_model(self):
@@ -204,10 +212,13 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
     def resample_emission_distn(self):
         xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
-        # Provide a mask if necessary
-        if self.has_missing_data:
-            masks = [s.mask for s in self.states_list]
-            self.emission_distn.resample(data=xys, mask=masks)
+        mask = [s.mask for s in self.states_list] if self.has_missing_data else None
+        omega = [s.omega for s in self.states_list] if self.has_count_data else None
+
+        if self.has_count_data:
+            self.emission_distn.resample(data=xys, mask=mask, omega=omega)
+        elif self.has_missing_data:
+            self.emission_distn.resample(data=xys, mask=mask)
         else:
             self.emission_distn.resample(data=xys)
 
@@ -367,8 +378,50 @@ class NonstationaryLDS(
     def sigma_init(self, sigma_init):
         self.init_dynamics_distn.sigma = sigma_init
 
-class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
+class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
+    _states_class = LDSStatesZeroInflatedCountData
 
+    def __init__(self, *args, rho=1.0, **kwargs):
+        """
+        :param rho: Probability of count drawn from model
+                    With pr 1-rho, the emission is deterministically zero
+        """
+        super(ZeroInflatedCountLDS, self).__init__(*args, **kwargs)
+        self.rho = rho
+
+    def add_data(self,data, inputs=None, mask=None, **kwargs):
+        self.states_list.append(self._states_class(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
+        return self
+
+    def _generate_obs(self,s, inputs):
+        if s.data is None:
+            # TODO: Do this sparsely
+            inputs = np.zeros((s.T, 0)) if inputs is None else inputs
+            data = self.emission_distn.rvs(
+                x=np.hstack((s.gaussian_states, inputs)), return_xy=False)
+
+            # Zero out data
+            from scipy.sparse import csr_matrix
+            zeros = np.random.rand(s.T, self.D_obs) > self.rho
+            data[zeros] = 0
+            s.data = csr_matrix(data)
+
+        else:
+            # filling in missing data
+            raise NotImplementedError
+        return s.data
+
+    def resample_emission_distn(self):
+        xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
+        mask = [s.mask for s in self.states_list] if self.has_missing_data else None
+        omega = [s.omega for s in self.states_list] if self.has_count_data else None
+
+        if self.has_count_data:
+            self.emission_distn.resample(data=xys, mask=mask, omega=omega)
+
+
+class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
+    _states_class = LaplaceApproxPoissonLDSStates
     @property
     def d(self):
         return self.emission_distn.b
@@ -385,11 +438,6 @@ class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
 
     def mode_heldout_log_likelihood(self):
         return sum(s.mode_heldout_log_likelihood() for s in self.states_list)
-
-    def add_data(self, data, mask=None, **kwargs):
-        assert isinstance(data, np.ndarray) and data.ndim == 2 and data.shape[1] == self.D_obs
-        states = LaplaceApproxPoissonLDSStates(model=self, data=data, T=data.shape[0], **kwargs)
-        self.states_list.append(states)
 
     def M_step(self):
         self.M_step_init_dynamics_distn()

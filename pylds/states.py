@@ -1,6 +1,8 @@
 from __future__ import division
-import numpy as np
 from warnings import warn
+import numpy as np
+from scipy.sparse import csr_matrix
+
 
 from pybasicbayes.util.general import objarray
 from pylds.lds_messages_interface import info_E_step, info_sample, kalman_info_filter, kalman_filter, E_step
@@ -503,7 +505,7 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         if mask is not None:
             assert mask.shape == data.shape
             self.mask = mask
-        elif data is not None and np.any(np.isnan(data)):
+        elif (data is not None) and isinstance(data, np.ndarray) and np.any(np.isnan(data)):
             warn("data includes NaN's. Treating these as missing data.")
             self.mask = ~np.isnan(data)
             # TODO: We should make this unnecessary
@@ -791,6 +793,256 @@ class LDSStates(
     _LDSStatesGibbs,
     _LDSStatesMeanField):
     pass
+
+
+
+class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
+    """
+    In many cases, the observation dimension is so large and so sparse
+    that a Bernoulli, Poisson, etc. is not a good model. Moreover, it
+    is computationally demanding to compute the likelihood for so many
+    terms. Zero-inflated models address both concerns. Let,
+
+        z_{t,n} ~ Bern(rho)
+        y_{t,n} ~ p(y_{t,n} | c_n.dot(x_t) + d_n))  if z_{t,n} = 1
+                = 0                                 o.w.
+
+    Then Z is effectively a mask on the data, and the likelihood only
+    depends on places where z_{t,n} = 1. Moreover, we only have to
+    introduce auxiliary variables for the entries that are unmasked.
+    """
+    def __init__(self,model, data=None, **kwargs):
+
+        # The data must be provided in sparse row format
+        # This makes it easy to iterate over rows. Basically,
+        # for each row, t, it is easy to get the output dimensions, n,
+        # such that y_{t,n} > 0.
+        super(LDSStatesZeroInflatedCountData, self).\
+            __init__(model, data=data, **kwargs)
+
+        # self.model = model
+        # self.T = T if T is not None else data.shape[0]
+        # self.data = data
+        # self.mask = mask
+        # self.inputs = np.zeros((self.T, 0)) if inputs is None else inputs
+        #
+        # self._normalizer = None
+        #
+        # if stateseq is not None:
+        #     self.gaussian_states = stateseq
+        # elif initialize_from_prior:
+        #     self.generate_states()
+        # elif initialize_to_noise:
+        #     self.gaussian_states = np.random.normal(size=(self.T, self.D_latent))
+        # elif data is not None:
+        #     self.resample()
+        # else:
+        #     raise Exception("Invalid options. Must specify how states are initialized.")
+
+        if data is not None:
+            assert isinstance(data, csr_matrix), "Data must be a sparse row matrix for zero-inflated models"
+
+            # Initialize a mask -- in this case, the mask implements
+            # the zero inflation
+            self.Z = csr_matrix((np.ones_like(data.data, dtype=bool),
+                                 data.indices,
+                                 data.indptr),
+                                shape=(self.data.shape))
+        else:
+            self.Z = None
+
+        # Initialize the Polya-gamma samplers
+        num_threads = ppg.get_omp_num_threads()
+        seeds = np.random.randint(2 ** 16, size=num_threads)
+        self.ppgs = [ppg.PyPolyaGamma(seed) for seed in seeds]
+        self.omega = None
+        self.masked_data = None
+
+    @property
+    def rho(self):
+        return self.model.rho
+
+    @property
+    def sigma_obs(self):
+        raise Exception("Count data does not have sigma_obs")
+
+    def generate_obs(self):
+        # Go through each time bin, get the discrete latent state,
+        # use that to index into the emission_distns to get samples
+        T, p = self.T, self.D_emission
+        ed = self.emission_distn
+        gss = self.gaussian_states
+        data = np.empty((T,p),dtype='double')
+
+        # TODO: Do this sparsely
+        for t in range(self.T):
+            data[t] = \
+                ed.rvs(x=np.hstack((gss[t][None, :], self.inputs[t][None,:])),
+                       return_xy=False)
+
+            # Zero out data
+            zeros = np.random.rand(p) > self.rho
+            data[t][zeros] = 0
+
+        data = csr_matrix(data)
+        return data
+
+    @property
+    def info_emission_params(self):
+        # CCT = [outer(c,c) for c in C]          # NxDxD
+        # J = (om * Z).dot(CCT)                  # TxDxD
+        # h = ((kappa - om * d) * Z).dot(C)      # TxD
+        T, D_latent, D_emission = self.T, self.D_latent, self.D_emission
+
+        masked_data, inputs, omega = self.masked_data, self.inputs, self.omega
+        emission_distn = self.emission_distn
+
+        C = emission_distn.A[:, :D_latent]
+        CCT = np.array([np.outer(c, c) for c in C]).reshape((D_emission, D_latent**2))
+        D = emission_distn.A[:,D_latent:]
+        b = emission_distn.b
+
+        J_node = np.dot(omega, CCT)
+
+        kappa = emission_distn.kappa_func(masked_data.data)
+        h_node = kappa.dot(C)
+        # Unfortunately, the following would be dense arrays
+        # h_node += -(omega * b.T).dot(C)
+        # h_node += -(omega * inputs.dot(D.T)).dot(C)
+
+        # This might not be much faster, but it should avoid making
+        # dense arrays
+        for t in range(T):
+            ns_t = masked_data.indices[masked_data.indptr[t]:masked_data.indptr[t+1]]
+            om_t = omega.indices[omega.indptr[t]:omega.indptr[t+1]]
+            h_node[t] -= (om_t * b[ns_t]).dot(C[ns_t])
+            h_node[t] -= (om_t * inputs[t].dot(D[ns_t].T)).dot(C[ns_t])
+
+        return J_node, h_node
+
+
+    @property
+    def extra_info_params(self):
+        J_init = np.linalg.inv(self.sigma_init)
+        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+
+        Q = self.sigma_states
+        logdet_pair = -np.linalg.slogdet(Q)[1]
+
+        # We need terms for u_t B^T Q^{-1} B u
+        B = self.B
+        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
+
+        # warn("extra_info_params not implemented for count data. "
+        #      "Log likelihood calculations will be wrong.")
+        # J_yy = np.zeros((self.D_emission, self.D_emission))
+        # logdet_node = np.zeros((self.T))
+        # hJh_node = np.zeros((self.D_input, self.D_input))
+        #
+        # masked_data = self.data * self.mask \
+        #     if self.mask is not None \
+        #     else self.data
+
+        # TODO: Fix this up
+        J_yy = 0
+        logdet_node = 0
+        hJh_node = 0
+        masked_data = 0
+
+        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, masked_data
+
+    @property
+    def expected_info_emission_params(self):
+        raise NotImplementedError("Mean field with count observations is not yet supported")
+
+    @property
+    def expected_extra_info_params(self):
+        raise NotImplementedError("Mean field with count observations is not yet supported")
+
+    @property
+    def psi(self):
+        T, C, D, ed = self.T, self.C, self.D, self.emission_distn
+        data, size, indices, indptr \
+            = self.masked_data, self.masked_data.size, \
+              self.masked_data.indices, self.masked_data.indptr
+
+        psi = np.zeros(size)
+        offset = 0
+        for t in range(T):
+            for n in indices[indptr[t]:indptr[t + 1]]:
+                psi[offset] = self.gaussian_states[t].dot(C[n])
+                psi[offset] += self.inputs[t].dot(D[n])
+                psi[offset] += ed.b[n]
+                offset += 1
+        return csr_matrix((psi, indices, indptr), shape=data.shape)
+
+    def resample(self, niter=1):
+        import ipdb; ipdb.set_trace()
+        self.resample_zeroinflation_variables()
+        self.resample_gaussian_states()
+        self.resample_auxiliary_variables()
+
+    def resample_auxiliary_variables(self):
+        T, C, D, ed = self.T, self.C, self.D, self.emission_distn
+
+        # TODO: Do this in batches -- move it to cython
+        data, size, indices, indptr \
+            = self.masked_data, self.masked_data.size, \
+              self.masked_data.indices, self.masked_data.indptr
+        psi = np.zeros(size)
+        offset = 0
+        for t in range(T):
+            for n in indices[indptr[t]:indptr[t+1]]:
+                psi[offset] = self.gaussian_states[t].dot(C[n])
+                psi[offset] += self.inputs[t].dot(D[n])
+                psi[offset] += ed.b[n]
+                offset += 1
+        psi = csr_matrix((psi, indices, indptr), shape=data.shape)
+        b = ed.b_func(data)
+
+        # Allocate vector for omega
+        self.omega = np.zeros(size)
+        ppg.pgdrawvpar(self.ppgs, b.data, psi.data, self.omega)
+        self.omega = csr_matrix((self.omega, indices, indptr), shape=data.shape)
+
+    def resample_zeroinflation_variables(self):
+        """
+        There's no way around the fact that we have to look at every
+        data point, even the zeros here.
+        """
+        T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
+        indptr = [0]
+        indices = []
+        vals = []
+        offset = 0
+        for t in range(T):
+            # Evaluate probability of data
+            x_t = np.concatenate((self.gaussian_states[t], self.inputs[t]))
+            y_t = np.array(self.data.getrow(t).todense())
+            ll = self.emission_distn.log_likelihood((x_t, y_t))
+
+            # Evaluate the probability that each emission was "exposed"
+            log_p_zero = np.log(self.rho) + ll
+            log_p_zero -= np.log(np.exp(log_p_zero) + (1-self.rho) * (y_t == 0))
+
+            # Sample zero inflation mask
+            z_t = np.random.rand(N) < np.exp(log_p_zero)
+
+            # Construct the sparse matrix
+            t_inds = np.where(z_t)[0]
+            indices.append(t_inds)
+            vals.append(y_t[t_inds])
+            offset += t_inds.size
+            indptr.append(offset)
+
+        # Construct a sparse matrix
+        self.masked_data = csr_matrix((vals, indices, indptr), shape=(T, N))
+
+    def smooth(self):
+        # By assumption, the data is too large to construct
+        # a dense smoothing matrix. Let's support a column-wise
+        # smoothing operation instead.
+        raise NotImplementedError
 
 
 class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
