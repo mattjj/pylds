@@ -806,7 +806,13 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         y_{t,n} ~ p(y_{t,n} | c_n.dot(x_t) + d_n))  if z_{t,n} = 1
                 = 0                                 o.w.
 
-    Then Z is effectively a mask on the data, and the likelihood only
+    If z_{t,n} = 1, we say that datapoint was "exposed." That is, the
+    observation y_{t,n} reflects the underlying latent state. The
+    observation may be zero, but that is still informative. However,
+    if the datapoint was not exposed (which can only happen if y_{t,n}=0),
+    then this term does not reflect the underlying state.
+
+    Thus, Z is effectively a mask on the data, and the likelihood only
     depends on places where z_{t,n} = 1. Moreover, we only have to
     introduce auxiliary variables for the entries that are unmasked.
     """
@@ -828,9 +834,10 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if data is not None:
             assert isinstance(data, csr_matrix), "Data must be a sparse row matrix for zero-inflated models"
 
-            # Initialize a mask -- in this case, the mask implements
-            # the zero inflation
-            # self.masked_data = self.data.copy()
+            # Initialize a sparse matrix of masked data. The mask
+            # specifies which observations were "exposed" and which
+            # were determinisitcally zero. In other words, the mask
+            # gives the data values at the places where z_{t,n} = 1.
             T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
             indptr = [0]
             indices = []
@@ -872,8 +879,6 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             self.masked_data = None
             self.omega = None
 
-
-
     @property
     def rho(self):
         return self.model.rho
@@ -905,10 +910,6 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     @property
     def info_emission_params(self):
-        # import ipdb; ipdb.set_trace()
-        # CCT = [outer(c,c) for c in C]          # NxDxD
-        # J = (om * Z).dot(CCT)                  # TxDxD
-        # h = ((kappa - om * d) * Z).dot(C)      # TxD
         T, D_latent, D_emission = self.T, self.D_latent, self.D_emission
 
         masked_data, inputs, omega = self.masked_data, self.inputs, self.omega

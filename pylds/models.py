@@ -420,8 +420,8 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
 
         However, in order to update the n-th row of the emission matrix,
         we need to know which counts are observed in the n-th column of data.
-
-        :return:
+        This involves converting the data to a sparse column format, which
+        can require (time) intensive re-indexing.
         """
         masked_datas = [s.masked_data.tocsc() for s in self.states_list]
         xs = [np.hstack((s.gaussian_states, s.inputs))for s in self.states_list]
