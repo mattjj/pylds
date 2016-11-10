@@ -13,7 +13,6 @@ from pypolyagamma.distributions import _PGLogisticRegressionBase
 # TODO on instantiating, maybe gaussian states should be resampled
 # TODO make niter an __init__ arg instead of a method arg
 
-
 ###########
 #  bases  #
 ###########
@@ -820,25 +819,6 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         super(LDSStatesZeroInflatedCountData, self).\
             __init__(model, data=data, **kwargs)
 
-        # self.model = model
-        # self.T = T if T is not None else data.shape[0]
-        # self.data = data
-        # self.mask = mask
-        # self.inputs = np.zeros((self.T, 0)) if inputs is None else inputs
-        #
-        # self._normalizer = None
-        #
-        # if stateseq is not None:
-        #     self.gaussian_states = stateseq
-        # elif initialize_from_prior:
-        #     self.generate_states()
-        # elif initialize_to_noise:
-        #     self.gaussian_states = np.random.normal(size=(self.T, self.D_latent))
-        # elif data is not None:
-        #     self.resample()
-        # else:
-        #     raise Exception("Invalid options. Must specify how states are initialized.")
-
         # Initialize the Polya-gamma samplers
         num_threads = ppg.get_omp_num_threads()
         seeds = np.random.randint(2 ** 16, size=num_threads)
@@ -850,7 +830,43 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
             # Initialize a mask -- in this case, the mask implements
             # the zero inflation
-            self.masked_data = self.data.copy()
+            # self.masked_data = self.data.copy()
+            T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
+            indptr = [0]
+            indices = []
+            vals = []
+            offset = 0
+            for t in range(T):
+                # Evaluate probability of data
+                ns_t = data.indices[data.indptr[t]:data.indptr[t + 1]]
+                y_t = np.zeros(N)
+                y_t[ns_t] = data.data[data.indptr[t]:data.indptr[t + 1]]
+
+                # Sample zero inflation mask
+                z_t = np.random.rand(N) < self.rho
+                z_t[ns_t] = True
+
+                # Construct the sparse matrix
+                t_inds = np.where(z_t)[0]
+                indices.append(t_inds)
+                vals.append(y_t[t_inds])
+                offset += t_inds.size
+                indptr.append(offset)
+
+            # Construct a sparse matrix
+            vals = np.concatenate(vals)
+            indices = np.concatenate(indices)
+            indptr = np.array(indptr)
+            self.masked_data = csr_matrix((vals, indices, indptr), shape=(T, N))
+
+            # DEBUG: Start with all the data
+            # dense_data = data.toarray()
+            # values = dense_data.ravel()
+            # indices = np.tile(np.arange(self.D_emission), (self.T,))
+            # indptrs = np.arange(self.T+1) * self.D_emission
+            # self.masked_data = csr_matrix((values, indices, indptrs), (self.T, self.D_emission))
+            # assert np.allclose(self.masked_data.toarray(), dense_data)
+
             self.resample_auxiliary_variables()
         else:
             self.masked_data = None
@@ -889,6 +905,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     @property
     def info_emission_params(self):
+        # import ipdb; ipdb.set_trace()
         # CCT = [outer(c,c) for c in C]          # NxDxD
         # J = (om * Z).dot(CCT)                  # TxDxD
         # h = ((kappa - om * d) * Z).dot(C)      # TxD
@@ -907,15 +924,15 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         kappa = emission_distn.kappa_func(masked_data.data)
         kappa = csr_matrix((kappa, masked_data.indices, masked_data.indptr), shape=masked_data.shape)
         h_node = kappa.dot(C)
-        # Unfortunately, the following would be dense arrays
+
+        # Unfortunately, the following operations would require dense arrays of size (TxD_emisison)
         # h_node += -(omega * b.T).dot(C)
         # h_node += -(omega * inputs.dot(D.T)).dot(C)
-
         # This might not be much faster, but it should avoid making
         # dense arrays
         for t in range(T):
             ns_t = masked_data.indices[masked_data.indptr[t]:masked_data.indptr[t+1]]
-            om_t = omega.indices[omega.indptr[t]:omega.indptr[t+1]]
+            om_t = omega.data[omega.indptr[t]:omega.indptr[t+1]]
             h_node[t] -= (om_t * b[ns_t][:,0]).dot(C[ns_t])
             h_node[t] -= (om_t * inputs[t].dot(D[ns_t].T)).dot(C[ns_t])
 
@@ -987,23 +1004,28 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         There's no way around the fact that we have to look at every
         data point, even the zeros here.
         """
+        # TODO: move this to cython?
         T, N, C, D, b = self.T, self.D_emission, self.C, self.D, self.emission_distn.b
         indptr = [0]
         indices = []
         vals = []
         offset = 0
+        X = np.hstack((self.gaussian_states, self.inputs))
         for t in range(T):
             # Evaluate probability of data
-            x_t = np.concatenate((self.gaussian_states[t], self.inputs[t])).ravel()
-            y_t = np.array(self.data.getrow(t).todense()).ravel()
-            ll = self.emission_distn.log_likelihood((x_t, y_t)).ravel()
+            y_t = np.zeros(N)
+            ns_t = self.data.indices[self.data.indptr[t]:self.data.indptr[t+1]]
+            y_t[ns_t] = self.data.data[self.data.indptr[t]:self.data.indptr[t+1]]
+            ll = self.emission_distn.log_likelihood((X[t], y_t))
+            ll = ll.ravel()
 
-            # Evaluate the probability that each emission was "exposed"
-            log_p_zero = np.log(self.rho) + ll
-            log_p_zero -= np.log(np.exp(log_p_zero) + (1-self.rho) * (y_t == 0))
+            # Evaluate the probability that each emission was "exposed",
+            # i.e. p(z_tn = 1 | y_tn, x_tn)
+            log_p_exposed = np.log(self.rho) + ll
+            log_p_exposed -= np.log(np.exp(log_p_exposed) + (1-self.rho) * (y_t == 0))
 
             # Sample zero inflation mask
-            z_t = np.random.rand(N) < np.exp(log_p_zero)
+            z_t = np.random.rand(N) < np.exp(log_p_exposed)
 
             # Construct the sparse matrix
             t_inds = np.where(z_t)[0]
@@ -1017,12 +1039,10 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         indices = np.concatenate(indices)
         indptr = np.array(indptr)
         self.masked_data = csr_matrix((vals, indices, indptr), shape=(T, N))
-        print("Number exposed: ", vals.size)
 
     def resample_auxiliary_variables(self):
+        # TODO: move this to cython
         T, C, D, ed = self.T, self.C, self.D, self.emission_distn
-
-        # TODO: Do this in batches -- move it to cython
         data, size, indices, indptr \
             = self.masked_data, self.masked_data.size, \
               self.masked_data.indices, self.masked_data.indptr
@@ -1042,12 +1062,14 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         ppg.pgdrawvpar(self.ppgs, b.data, psi.data, self.omega)
         self.omega = csr_matrix((self.omega, indices, indptr), shape=data.shape)
 
-
     def smooth(self):
-        # By assumption, the data is too large to construct
-        # a dense smoothing matrix. Let's support a column-wise
-        # smoothing operation instead.
-        raise NotImplementedError
+        # TODO: By assumption, the data is too large to construct
+        # TODO: a dense smoothing matrix. Let's support a column-wise
+        # TODO: smoothing operation instead.
+        warn("Zero inflated smoothing is instantiating a dense matrix!")
+        X = np.column_stack((self.gaussian_states, self.inputs))
+        mean = self.rho * self.emission_distn.mean(X)
+        return mean
 
 
 class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
