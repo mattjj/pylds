@@ -844,7 +844,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             vals = []
             offset = 0
             for t in range(T):
-                # Evaluate probability of data
+                # Get the nonzero entries in the t-th row
                 ns_t = data.indices[data.indptr[t]:data.indptr[t + 1]]
                 y_t = np.zeros(N)
                 y_t[ns_t] = data.data[data.indptr[t]:data.indptr[t + 1]]
