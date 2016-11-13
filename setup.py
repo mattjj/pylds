@@ -69,7 +69,8 @@ setup(
         'scipy>=0.16',
         'matplotlib',
         'pybasicbayes',
-        'pypolyagamma>=1.1'],
+        'pypolyagamma>=1.1',
+        'autograd'],
     ext_modules=ext_modules,
     classifiers=[
         'Intended Audience :: Science/Research',
