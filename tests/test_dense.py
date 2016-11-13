@@ -35,6 +35,9 @@ def bmat(blocks):
 
 
 def random_rotation(n,theta):
+    if n == 1:
+        return np.random.rand() * np.eye(1)
+
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
     out = np.zeros((n,n))
@@ -138,14 +141,15 @@ def same_loglike(model,_):
     dense_loglike = multivariate_normal.logpdf(data.ravel(),mu_y,sigma_y)
 
     model_loglike = model.log_likelihood()
-
+    if not np.isclose(dense_loglike, model_loglike):
+        print("model - dense: ", model_loglike - dense_loglike)
     assert np.isclose(dense_loglike, model_loglike)
 
 
 def random_model(n,p,d,T):
     data = np.random.randn(T,p)
     inputs = np.random.randn(T,d)
-    model = DefaultLDS(n,p,d)
+    model = DefaultLDS(p,n,d)
     model.A = 0.99*random_rotation(n,0.01)
     model.B = 0.1*np.random.randn(n,d)
     model.C = np.random.randn(p,n)
@@ -160,10 +164,6 @@ def random_model(n,p,d,T):
 def check_random_model(check):
     n, p, d = np.random.randint(2,5), np.random.randint(2,5), np.random.randint(0,3)
     T = np.random.randint(10,20)
-    # n = 2
-    # p = 1
-    # d = 1
-    # T = 2
     check(*random_model(n,p,d,T))
 
 

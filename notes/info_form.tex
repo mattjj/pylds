@@ -45,14 +45,14 @@
 \maketitle
 \onehalfspacing
 
-The \emph{information form} of the Gaussian distribution is defined as,
+The \emph{information form} of the Gaussian density of~$x \in \reals^n$ is defined as,
 \begin{align}
   p(x \given J, h) 
   &=  \exp \left \{ -\frac{1}{2} x^\trans J x + h^\trans x - \log Z \right \},
 \end{align}
 where
 \begin{align}
-  \log Z = \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2}\log |J|.
+  \log Z = \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2}\log |J| +\frac{n}{2} \log 2\pi.
 \end{align}
 The standard formulation is recovered by the transformations,  $\Sigma = J^{-1}$, and
 $\mu = J^{-1} h$. The advantage of working in the information form is that 
@@ -76,22 +76,60 @@ then,
 \paragraph{Marginalization}
 If,
 \begin{align}
-  \begin{bmatrix} x \\ y  \end{bmatrix}
+  \begin{bmatrix} x_1 \\ x_2  \end{bmatrix}
   &\sim
   \distNormal \left(
   \begin{bmatrix} 
-    J_{xx}        & J_{xy} \\
-    J_{xy}^\trans & J_{yy} 
+    J_{11}        & J_{12} \\
+    J_{12}^\trans & J_{22} 
   \end{bmatrix},
-  \begin{bmatrix} h_{x} \\ h_y \end{bmatrix}
+  \begin{bmatrix} h_1 \\ h_2 \end{bmatrix}
   \right),
 \end{align}
 then,
 \begin{align}
-  x &\sim \distNormal(
-        J_{xx} - J_{xy}J_{yy}^{-1} J_{xy}^\trans, \;
-        h_x - J_{xy} J_{yy}^{-1} h_y)
+  x_2 &\sim \distNormal(
+        J_{22} - J_{21}J_{11}^{-1} J_{21}^\trans, \;
+        h_2 - J_{21} J_{11}^{-1} h_1)
 \end{align}
+
+\begin{proof}
+  We use the following integral identity,
+\begin{align}
+  \int \exp \left \{ - \frac{1}{2} x^\trans J x + h^\trans x\right\} \mathrm{d} x
+  &= \exp \left\{ \frac{1}{2} h^\trans J^{-1} h - \frac{1}{2} \log |J| + \frac{n}{2} \log 2 \pi \right\}.
+\end{align}
+For~$x = [x_1, x_2]^\trans$, we marginalize out~$x_1$ via,
+\begin{align}
+  \int \exp \left \{ - \frac{1}{2}
+  \begin{bmatrix} x_1^\trans & x_2^\trans \end{bmatrix} 
+  \begin{bmatrix} J_{11} & J_{12} \\ J_{21} & J_{22} \end{bmatrix}
+  \begin{bmatrix} x_1 \\  x_2 \end{bmatrix}
+  + \begin{bmatrix} h_1^\trans & h_2^\trans \end{bmatrix} 
+  \begin{bmatrix} x_1 \\  x_2 \end{bmatrix}
+  - \log Z
+  \right \}
+  \mathrm{d} x_1.
+\end{align}
+Rearranging terms, we have,
+\begin{align}
+  &\exp \left \{ -\frac{1}{2} x_2^\trans J_{22} x_2 + h_2^\trans x_2 - \log Z \right \}
+  \int \exp \left \{- \frac{1}{2} x_1^\trans J_{11} x_1 + (h_1 - J_{12}x_2)^\trans x_1 \right \} \mathrm{d}x_1 \\
+  &= \exp \left \{ -\frac{1}{2} x_2^\trans J_{22} x_2 + h_2^\trans x_2 - \log Z \right \}
+  \exp \left \{ \frac{1}{2} (h_1 - J_{12}x_2)^\trans J_{11}^{-1} (h_1 - J_{12} x_2) - \frac{1}{2} \log |J_{11}| + \frac{n}{2} \log 2 \pi \right \} \\
+  &= \exp \left \{ -\frac{1}{2} x_2^\trans (J_{22} - J_{21}J_{11}^{-1} J_{12}) x_2
+  + (h_2 - J_{21} J_{11}^{-1} h_1)^\trans x_2 - \log Z \right \} \nonumber \\
+  &\qquad \qquad \times
+  \exp \left \{ \frac{1}{2} h_1^\trans J_{11}^{-1} h_1 - \frac{1}{2} \log |J_{11}| + \frac{n}{2} \log 2 \pi \right \}.
+\end{align}
+We recognize this as a Gaussian potential on~$x_2$ of the form,
+\begin{align}
+  p(x_2) &= \exp \left \{-\frac{1}{2} x_2^\trans \widetilde{J}_2 x_2 + \widetilde{h}_2^\trans x_2 - \log \widetilde{Z}_2 \right \} \\
+  \widetilde{J}_2 &= J_{22} - J_{21}J_{11}^{-1} J_{12} \\
+  \widetilde{h}_2 &= h_2 - J_{21} J_{11}^{-1} h_1 \\
+  \log \widetilde{Z}_2 &= \log Z -\frac{1}{2} h_1^\trans J_{11}^{-1} h_1 + \frac{1}{2} \log |J_{11}| - \frac{n}{2} \log 2 \pi.
+\end{align}
+\end{proof}
 
 \section*{Filtering, Sampling, and Smoothing}
 By interleaving these two steps we can filter, sample, and smooth the latent states
@@ -104,7 +142,7 @@ in a linear dynamical system. Take the model,
 In information form, the initial distribution is,
 \begin{align}
   % initi
-  x_1 &\sim \distNormal(J=Q_1^{-1}, h = Q_1^{-1} mu_1).
+  x_1 &\sim \distNormal(J=Q_1^{-1}, h = Q_1^{-1} \mu_1).
 \end{align}
 The dynamics are given by,
 \begin{align}
@@ -143,7 +181,7 @@ with
 We seek the conditional distribution,~$p(x_t \given y_{1:t})$, which 
 will be Gaussian. We begin with the initial distribution, 
 \begin{align}
-  p(x_1) &= \distNormal(x_1 \given J_{1 \given 0}, h_{1 \given 0}).
+  p(x_1) &= \distNormal(x_1 \given J_{1 | 0}, h_{1 | 0}).
 \end{align}
 Assume, inductively, that~$x_t \given y_{1:t-1} \sim \distNormal(J_{t|t-1}, h_{t|t-1})$. Conditioning on the~$t$-th observation yields,
 Conditioned on the first observation,
@@ -163,6 +201,129 @@ This completes one iteration and provides the input to the next. To start the re
 \begin{align}
   J_{1|0} = \Sigma_{\sf init}^{-1}, \quad
   h_{1|0} = \Sigma_{\sf init}^{-1} \, \mu_{\sf init}.
+\end{align}
+
+\subsection*{Marginal Likelihood}
+This filtering algorithm corresponds to message passing
+in a chain-structured Gaussian graphical model. To compute
+the marginal likelihood,~$p(y_{1:T})$, we observe that it
+is the normalization constant of the graphical model,
+\begin{align}
+  p(x_{1:T}) &=
+  \frac{1}{Z} \prod_{t=1}^T \psi(x_t) \prod_{t=1}^{T-1} \psi(x_t, x_{t+1}), & & \\
+  \psi(x_1) &= p(x_1) \, p(y_1 \given x_1)  & & \\
+  \psi(x_t) &= p(y_t \given x_t)  & \text{for } t&=2 \ldots T \\
+  \psi(x_t, x_{t+1}) &= p(x_{t+1} \given x_t)  & \text{for } t&=1 \ldots T-1.
+\end{align}
+To compute the normalizaion constant~$Z$, we recursively eliminate nodes
+via message passing.
+
+\paragraph{Base case.} Let us work backward from the final step in which
+we are left with a graph with a single, unnormalized Gaussian potential.
+\begin{align}
+  p(x_T) &= \frac{1}{Z} \psi(x_T)
+  = \frac{1}{Z} \exp \left \{-\frac{1}{2} x_T^\trans J_{T} x_T + h_{T}^\trans x_T - \log Z_{T} \right \}
+\end{align}
+To compute the normalizing constant,~$Z$, we integrate over~$x_T$ and use
+the normalizing constant for Gaussian distributions:
+\begin{align}
+  Z &= \int \exp \left \{-\frac{1}{2} x_T^\trans J_{T} x_T + h_{T}^\trans x_T - \log Z_{T} \right \} \mathrm{d} x_T \\
+  &= \exp \left \{ -\log Z_{T} \right \}
+  \int \exp \left \{-\frac{1}{2} x_T^\trans J_{T} x_T + h_{T}^\trans x_T \right \} \mathrm{d} x_T \\
+  &= \exp \left \{ -\log Z_{T} +\frac{1}{2} h_{T}^\trans J_{T}^{-1} h_{T} - \frac{1}{2} \log |J_{T}| +\frac{n}{2} \log 2 \pi \right \}
+\end{align}
+
+\paragraph{Condition Step.} In the second to last step, we have two potentials,
+one from the dynamics induced by the preceding step and one from the observation:
+\begin{align}
+  p(x_T) &= \frac{1}{Z} \psi_{\sf dyn}(x_T) \, \psi_{\sf obs}(x_T) \\
+  &= \exp \left \{-\frac{1}{2} x_T^\trans J_{T|T-1} x_T + h_{T|T-1}^\trans x_T - \log Z_{T|T-1} \right \}
+  \exp \left \{-\frac{1}{2} x_T^\trans J_{\sf obs} x_T + h_{\sf obs}^\trans x_T - \log Z_{\sf obs} \right \}
+\end{align}
+We reduce this to the base case by simply summing the natural parameters and
+log normalizers,
+\begin{align}
+  J_{T} &= J_{T|T-1} + J_{\sf obs} \\
+  h_{T} &= h_{T|T-1} + h_{\sf obs} \\
+  \log Z_{T} &= \log Z_{T|T-1} + \log Z_{\sf obs}.
+\end{align}
+
+\paragraph{Predict Step.} Now consider a model with two latent states. 
+\begin{align}
+  p(x_{T-1}, x_T) &= \frac{1}{Z} \psi(x_{T-1}) \, \psi_{\sf dyn}(x_{T-1}, x_T) \, \psi_{\sf obs}(x_T)
+\end{align}
+We will eliminate the variable~$x_{T-1}$ by marginalizing, or integrating it out.
+\begin{align}
+  p(x_T) &= \frac{1}{Z} \psi_{\sf obs}(x_T) \int \psi(x_{T-1}) \, \psi_{\sf dyn}(x_{T-1}, x_T) \mathrm{d}x_{T-1}
+\end{align}
+The integrand is of the form,
+\begin{align}
+  &\psi(x_{T-1}) \, \psi_{\sf dyn}(x_{T-1}, x_T)
+  \\
+  &= \exp \left \{ -\frac{1}{2} x_{T-1}^\trans J_{T-1} x_{T-1} + h_{T-1}^\trans x_{T-1} - \log Z_{T-1} \right \} \\
+  &\qquad \times 
+  \exp \left \{ - \frac{1}{2}
+  \begin{bmatrix} x_{T-1}^\trans & x_T^\trans \end{bmatrix} 
+  \begin{bmatrix} J_{11} & J_{12} \\ J_{21} & J_{22} \end{bmatrix}
+  \begin{bmatrix} x_{T-1} \\  x_T \end{bmatrix}
+  + \begin{bmatrix} h_1^\trans & h_2^\trans \end{bmatrix} 
+  \begin{bmatrix} x_{T-1} \\  x_T \end{bmatrix}
+  - \log Z_{\sf dyn}
+  \right \}
+  \\
+  &= 
+  \exp \left \{ - \frac{1}{2}
+  \begin{bmatrix} x_{T-1}^\trans & x_T^\trans \end{bmatrix} 
+  \begin{bmatrix} J_{11} + J_{T-1} & J_{12} \\ J_{21} & J_{22} \end{bmatrix}
+  \begin{bmatrix} x_{T-1} \\  x_T \end{bmatrix}
+  + \begin{bmatrix} (h_1 + h_{T-1})^\trans & h_2^\trans \end{bmatrix} 
+  \begin{bmatrix} x_{T-1} \\  x_T \end{bmatrix}
+  - (\log Z_{T-1} + \log Z_{\sf dyn})
+  \right \}
+\end{align}
+Appealing to the marginalization propositions above, this implies,
+\begin{align}
+  \int \psi(x_{T-1}) \, \psi_{\sf dyn}(x_{T-1}, x_T) \, \mathrm{d} x_{T-1}
+  &= \exp \left \{-\frac{1}{2} x_T^\trans J_{T|T-1} x_T + h_{T|T-1}^\trans x_T
+  - \log Z_{T|T-1} \right \},
+\end{align}
+where
+\begin{multline}
+  \log Z_{T|T-1} = \\
+  \log Z_{T-1} + \log Z_{\sf dyn} 
+  -\frac{1}{2} (h_1 + h_{T-1}^\trans) (J_{11} + J_{T-1})^{-1} (h_1 + h_{T-1}^\trans) 
+  + \frac{1}{2} \log |J_{11} + J_{T-1}| - \frac{n}{2} \log 2 \pi.
+\end{multline}
+Thus, the log normalizer passed into the condition step is an accumulation of
+log normalizers from previous time steps ($\log Z_{T-1}$), the log normalizer
+of the dynamics potential ($\log Z_{\sf dyn}$), and a term that comes from
+marginalizing out the local variable~$x_{T-1}$. Once we have computed
+~$\log Z_{T|T-1}$, it is passed into the condition step and then into the final
+integration to compute the marginal likelihood.
+
+This process of predicting and conditioning is recursively applied, marginalizing
+out variables one at a time, starting with~$x_1$ and ending with~$x_T$. At the
+end of this procedure, we are left with the marginal likelihood of the observations.
+
+\subsection*{Standard Form Marginal likelihood}
+The marginal likelihood of the observed data is given by,
+\begin{align}
+  \log p(y_{1:T} \given u_{1:T})
+  &= \sum_{t=1}^T \log p(y_t \given y_{1:t-1}, u_{1:t}) \\
+  &= \sum_{t=1}^T \log \distNormal(y_t \given C \mu_{t | t-1} + D u_t,  S_t),
+\end{align}
+where
+\begin{align}
+  S_t &= C \Sigma_{t | t-1} C^\trans + R_t \\
+  \mu_{t | t-1} &= J_{t | t-1}^{-1} h_{t|t-1} \\
+  \Sigma_{t | t-1} &= J_{t|t-1}^{-1}
+\end{align}
+Expanding the above, we have,
+\begin{align}
+  \log p(y_{1:T} \given u_{1:T})
+  &= \sum_{t=1}^T \left[ -\frac{N}{2} \log 2 \pi - \frac{1}{2} \log \big| S_t  \big|  
+     - \frac{1}{2} (y_t - C \mu_{t | t-1} - D u_t)^\trans S_t^{-1}
+     (y_t - C \mu_{t | t-1} - D u_t) \right]
 \end{align}
 
 \subsection*{Backward Sampling}
@@ -248,5 +409,53 @@ Substituting the simplified forms above yields,
   J_{t|T} &= J_{t|t} + J_{11} - J_{12} (J_{t+1|T} - J_{t+1|t} + J_{22})^{-1} J_{12}^\trans \\
   h_{t|T} &= h_{t|t} + h_1 - J_{12} (J_{t+1|T} - J_{t+1|t} + J_{22})^{-1} (h_{t+1|T} - h_{t+1|t} +h_2).
 \end{align}
+
+\appendix
+
+\subsection*{Working out marginal likelihood in a simple example}
+\begin{align}
+  p(x) &= \frac{1}{Z} \distNormal(x \given 0, 1) \, \distNormal(1 \given x, \sigma^2) \\
+  &= \frac{1}{Z}
+  \exp \left \{ -\frac{1}{2} x^2 -\frac{1}{2} \log 2 \pi \right \}
+  \exp \left \{ -\frac{1}{2} \frac{(x-1)^2}{\sigma^2}  -\frac{1}{2} \log 2 \pi -\frac{1}{2} \log \sigma^2 \right \} \\
+  &= \frac{1}{Z} \exp \left \{ -\frac{1}{2} (x^2 + \frac{x^2}{\sigma^2}) -\frac{1}{2} \frac{-2x}{\sigma^2} -\frac{1}{2}\frac{1}{\sigma^2}  - \log 2 \pi  -\frac{1}{2} \log \sigma^2 \right \} \\
+  &= \frac{1}{Z} \exp \left \{ -\frac{1}{2} (1 + \frac{1}{\sigma^2}) x^2 + \frac{x}{\sigma^2} -\frac{1}{2\sigma^2}  - \log 2 \pi  -\frac{1}{2} \log \sigma^2 \right \}
+\end{align}
+This implies that the normalization constant is,
+\begin{align}
+  Z &= \exp \left \{  - \log 2 \pi -\frac{1}{2\sigma^2} + \frac{1}{2} (\frac{1}{\sigma^2}(1+\frac{1}{\sigma^2})^{-1} \frac{1}{\sigma^2}) - \frac{1}{2} \log |1+\frac{1}{\sigma^2}| + \frac{1}{2} \log 2 \pi -\frac{1}{2} \log \sigma^2\right \} \\
+  &= \exp \left \{ -\frac{1}{2} \log 2 \pi - \frac{1}{2\sigma^2} + \frac{1}{2\sigma^2} \frac{1}{1+\sigma^2} - \frac{1}{2} \log(1+\sigma^2) + \frac{1}{2}\log \sigma^2 -\frac{1}{2} \log \sigma^2\right \}\\
+  &= \exp \left \{ -\frac{1}{2} \log 2 \pi - \frac{1}{2}  \frac{1}{1+\sigma^2} - \frac{1}{2} \log(1+\sigma^2) \right \}
+\end{align}
+From the standard marginal likelihood, we know that this is like,
+\begin{align}
+  \log p(y=1) &= \log \distNormal(1 \given 0, 1 + \sigma^2) \\
+  &= -\frac{1}{2} \log 2 \pi -\frac{1}{2} \log (1+\sigma^2) - \frac{1}{2} \frac{1^2}{1+\sigma^2} \\
+%  &= -\frac{1}{2} \log 2 \pi -\frac{1}{2} \log 2 - \frac{1}{4}
+\end{align}
+Thankfully, all checks out!
+
+\subsection*{Working out marginal likelihood in an input example}
+\begin{align}
+  p(x) &= \frac{1}{Z} \distNormal(x \given 0, 1) \, \distNormal(1 \given x + d, 1) \\
+  &= \frac{1}{Z}
+  \exp \left \{ -\frac{1}{2} x^2 -\frac{1}{2} \log 2 \pi \right \}
+  \exp \left \{ -\frac{1}{2} (x+d-1)^2  -\frac{1}{2} \log 2 \pi \right \} \\
+  &= \frac{1}{Z} \exp \left \{ -\frac{1}{2} (x^2 + x^2) -\frac{1}{2} 2x(d-1) -\frac{1}{2}(d-1)^2  - \log 2 \pi  \right \} \\
+  &= \frac{1}{Z} \exp \left \{ -\frac{1}{2} 2x^2 + x(1-d) -\frac{1}{2}(d-1)^2  - \log 2 \pi  \right \}
+\end{align}
+This implies that the normalization constant is,
+\begin{align}
+  Z &= \exp \left \{  - \log 2 \pi -\frac{1}{2}(d-1)^2  + \frac{1}{2} \frac{(1-d)^2}{2} - \frac{1}{2} \log |2| + \frac{1}{2} \log 2 \pi \right \} \\
+    &= \exp \left \{  - \frac{1}{2}\log 2 \pi -\frac{1}{4}(d-1)^2   - \frac{1}{2} \log |2| \right \} 
+\end{align}
+From the standard marginal likelihood, we know that this is like,
+\begin{align}
+  \log p(y=1) &= \log \distNormal(1 \given d, 2) \\
+  &= -\frac{1}{2} \log 2 \pi -\frac{1}{2} \log 2 - \frac{1}{2} \frac{(1-d)^2}{2} \\
+%  &= -\frac{1}{2} \log 2 \pi -\frac{1}{2} \log 2 - \frac{1}{4}
+\end{align}
+Thankfully, all checks out!
+
 
 \end{document}

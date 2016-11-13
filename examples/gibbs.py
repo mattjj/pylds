@@ -11,7 +11,7 @@ npr.seed(0)
 # Set parameters
 D_obs = 1
 D_latent = 2
-D_input = 0
+D_input = 1
 T = 2000
 
 # Simulate from one LDS

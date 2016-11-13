@@ -85,16 +85,24 @@ from pylds.lds_info_messages import \
     info_sample as _info_sample
 
 
-def _info_argcheck(J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node):
+def _info_argcheck(J_init, h_init, log_Z_init,
+                   J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair,
+                   J_node, h_node, log_Z_node):
     T = h_node.shape[0]
+    assert np.isscalar(log_Z_init)
     J_pair_11, J_pair_21, J_pair_22, J_node = \
         map(partial(_ensure_ndim, T=T, ndim=3),
             [J_pair_11, J_pair_21, J_pair_22, J_node])
     h_pair_1, h_pair_2 = \
         map(partial(_ensure_ndim, T=T, ndim=2),
             [h_pair_1, h_pair_2])
+    log_Z_pair = _ensure_ndim(log_Z_pair, T=T-1, ndim=1)
+    log_Z_node = _ensure_ndim(log_Z_node, T=T, ndim=1)
+
     h_node = np.require(h_node, dtype=np.float64, requirements='C')
-    return J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node
+    return J_init, h_init, log_Z_init, \
+           J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair,\
+           J_node, h_node, log_Z_node
 
 
 kalman_info_filter = _wrap(_kalman_info_filter, _info_argcheck)

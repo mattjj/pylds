@@ -45,9 +45,9 @@ class _LDSStates(object):
         if self._normalizer is None:
             self._normalizer, _, _ = kalman_info_filter(*self.info_params)
 
-            self._normalizer += self._info_extra_loglike_terms(
-                *self.extra_info_params,
-                isdiag=self.diagonal_noise)
+            # self._normalizer += self._info_extra_loglike_terms(
+            #     *self.extra_info_params,
+            #     isdiag=self.diagonal_noise)
 
         return self._normalizer
 
@@ -180,7 +180,12 @@ class _LDSStates(object):
     def info_init_params(self):
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-        return J_init, h_init
+
+        log_Z_init = -1. / 2 * h_init.dot(np.linalg.solve(J_init, h_init))
+        log_Z_init += 1. / 2 * np.linalg.slogdet(J_init)[1]
+        log_Z_init -= self.D_latent / 2. * np.log(2 * np.pi)
+
+        return J_init, h_init, log_Z_init
 
     @property
     def info_dynamics_params(self):
@@ -200,120 +205,66 @@ class _LDSStates(object):
         h_pair_1 = self.inputs.dot(mBTQiA)
         h_pair_2 = self.inputs.dot(BTQi)
 
-        return J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2
+        log_Z_pair = -1. / 2 * np.linalg.slogdet(Q)[1]
+        log_Z_pair -= self.D_latent / 2. * np.log(2 * np.pi)
+        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
+        log_Z_pair -= 1. / 2 * np.einsum('ij,ti,tj->t', hJh_pair, self.inputs[:-1], self.inputs[:-1])
+
+        return J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair
 
     @property
     def info_emission_params(self):
         # TODO: Check for diagonal emissions
         C = self.C
-        D = self.D
-        R = self.sigma_obs
-        RinvC = np.linalg.solve(R, C)
-        J_node = C.T.dot(RinvC)
+        centered_data = self.data - self.inputs.dot(self.D.T)
 
-        # TODO: Faster to replace this with a loop?
-        # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
-        h_node = (self.data - self.inputs.dot(D.T)).dot(RinvC)
+        # Observations
+        log_Z_node = -self.D_emission / 2. * np.log(2 * np.pi) * np.ones(self.T)
+        if self.diagonal_noise:
+            # Use the fact that the diagonal regression prior is factorized
+            rsq = self.emission_distn.sigmasq_flat
+            RinvC = (1/rsq)[:,None] * C
+            J_node = C.T.dot(RinvC)
+            h_node = centered_data.dot(RinvC)
 
-        return J_node, h_node
+            log_Z_node += -np.sum(np.log(rsq))
+            log_Z_node -= 1./2 * np.sum(centered_data**2 * 1./rsq, axis=1)
+
+        else:
+            Rinv = np.linalg.inv(self.sigma_obs)
+            RinvC = Rinv.dot(C)
+
+            J_node = C.T.dot(RinvC)
+            h_node = centered_data.dot(RinvC)
+
+            log_Z_node += 1./2 * np.linalg.slogdet(Rinv)[1]
+            log_Z_node -= 1./2 * np.einsum('ij,ti,tj->t', Rinv,
+                                           centered_data, centered_data)
+
+        return J_node, h_node, log_Z_node
 
     @property
     def info_params(self):
         return self.info_init_params + self.info_dynamics_params + self.info_emission_params
 
-    @property
-    def extra_info_params(self):
-        # TODO: This should have terms related to self.inputs
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
+    def info_filter(self):
+        self._normalizer, filtered_Js, filtered_hs = \
+            kalman_info_filter(*self.info_params)
 
-        Q = self.sigma_states
-        logdet_pair = -np.linalg.slogdet(Q)[1]
+        return filtered_Js, filtered_hs
 
-        # We need terms for u_t B^T Q^{-1} B u
-        B = self.B
-        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
-
-        # Observations
-        if self.diagonal_noise:
-            # Use the fact that the diagonalregression prior is factorized
-            rsq = self.emission_distn.sigmasq_flat
-            J_yy = 1./rsq
-            logdet_node = -np.sum(np.log(rsq))
-
-            # We need terms for u_t D^T R^{-1} D u
-            D = self.D
-            hJh_node = D.T.dot(np.diag(J_yy).dot(D))
-
-        else:
-            R = self.sigma_obs
-            J_yy = np.linalg.inv(R)
-            logdet_node = -np.linalg.slogdet(R)[1]
-
-            # We need terms for u_t D^T R^{-1} D u
-            D = self.D
-            hJh_node = D.T.dot(np.linalg.solve(R, D))
-
-        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, self.data
-
-    @staticmethod
-    def _info_extra_loglike_terms(
-            J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, inputs, data,
-            isdiag=False):
-        warn("Log likelihood calculations are not correct!")
-        p, n, T = J_yy.shape[0], h_init.shape[0], data.shape[0]
-
-        out = 0.
-
-        # Initial distribution
-        out -= 1./2 * h_init.dot(np.linalg.solve(J_init, h_init))
-        out += 1./2 * np.linalg.slogdet(J_init)[1]
-        out -= n/2. * np.log(2*np.pi)
-
-        # -1/2 log |Q| -n/2 log(2pi)
-        out += 1./2 * logdet_pair.sum() if isinstance(logdet_pair, np.ndarray) \
-            else (T-1)/2. * logdet_pair
-        out -= (T-1)*n/2. * np.log(2*np.pi)
-
-        # We need terms for u_t B^T Q^{-1} B u
-        contract = 'ij,ti,tj->' if hJh_pair.ndim == 2 else 'tij,ti,tj->'
-        out -= 1. / 2 * np.einsum(contract, hJh_pair, inputs[:-1], inputs[:-1])
-
-        # -1/2 y^T R^{-1} y
-        if isdiag:
-            assert (J_yy.ndim == 1 and J_yy.shape[0] == data.shape[1]) or \
-                   (J_yy.shape == data.shape)
-            out -= 1./2 * np.sum(data**2 * J_yy)
-        else:
-            contract = 'ij,ti,tj->' if J_yy.ndim == 2 else 'tij,ti,tj->'
-            out -= 1./2 * np.einsum(contract, J_yy, data, data)
-
-        # We need terms for u_t D^T R^{-1} D u
-        contract = 'ij,ti,tj->' if hJh_node.ndim == 2 else 'tij,ti,tj->'
-        out -= 1. / 2 * np.einsum(contract, hJh_node, inputs, inputs)
-
-        # -1/2 log |R| -p/2 log(2 pi)
-        out += 1./2 * logdet_node.sum() if isinstance(logdet_node, np.ndarray) \
-            else T/2. * logdet_node
-        out -= T*p/2. * np.log(2*np.pi)
-
-        return out
-
-
-    def filter(self):
-        # self._normalizer, self.filtered_Js, self.filtered_hs = \
-        #     kalman_info_filter(*self.info_params)
-
-        _, filtered_mus, filtered_sigmas = kalman_filter(
+    def kalman_filter(self):
+        self._normalizer, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init,
             self.A, self.B, self.sigma_states,
             self.C, self.D, self.sigma_obs,
             self.inputs, self.data)
 
         # Update the normalization constant
-        self._gaussian_normalizer += self._info_extra_loglike_terms(
-            *self.extra_info_params,
-            isdiag=self.diagonal_noise)
+        # self._gaussian_normalizer += self._info_extra_loglike_terms(
+        #     *self.extra_info_params,
+        #     isdiag=self.diagonal_noise)
+        return filtered_mus, filtered_sigmas
 
     def smooth(self):
         # Use the info E step because it can take advantage of diagonal noise
@@ -341,10 +292,6 @@ class _LDSStates(object):
         self._normalizer, self.smoothed_mus, \
         self.smoothed_sigmas, E_xtp1_xtT = \
             info_E_step(*self.info_params)
-
-        self._normalizer += self._info_extra_loglike_terms(
-            *self.extra_info_params,
-            isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
             self.smoothed_mus, self.smoothed_sigmas, E_xtp1_xtT)
@@ -401,12 +348,11 @@ class _LDSStatesGibbs(_LDSStates):
     def resample_gaussian_states(self):
         self._normalizer, self.gaussian_states = \
             info_sample(*self.info_params)
-        self._normalizer += self._info_extra_loglike_terms(
-            *self.extra_info_params, isdiag=self.diagonal_noise)
 
 class _LDSStatesMeanField(_LDSStates):
     @property
     def expected_info_dynamics_params(self):
+        raise Exception("This must be updated with log normalizers")
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             self.dynamics_distn.meanfield_expectedstats()
 
@@ -425,6 +371,7 @@ class _LDSStatesMeanField(_LDSStates):
 
     @property
     def expected_info_emission_params(self):
+        raise Exception("This must be updated with log normalizers")
         # TODO: Use the fact that the diagonalregression prior is factorized
         # E_C, E_CCT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
         # E_C, E_D = E_C[:, :self.n], E_C[:, self.n:]
@@ -527,6 +474,7 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
 
     @property
     def _info_emission_params_diag(self):
+        raise Exception("This must be updated with log normalizers")
         C, D = self.C, self.D
         sigmasq = self.emission_distn.sigmasq_flat
         J_obs = self.mask / sigmasq
@@ -545,6 +493,7 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
 
     @property
     def _info_emission_params_dense(self):
+        raise Exception("This must be updated with log normalizers")
         T, D_latent = self.T, self.D_latent
         data, inputs, mask = self.data, self.inputs, self.mask
 
@@ -561,16 +510,6 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
 
         J_node = J_node.reshape((self.T, self.D_latent, self.D_latent))
         return J_node, h_node
-
-    @property
-    def extra_info_params(self):
-        params = super(_LDSStatesMaskedData, self).extra_info_params
-
-        # TODO: Mask off missing data entries -- might not work?
-        if self.mask is not None:
-            params = params[:-1] + (self.data * self.mask, )
-
-        return params
 
     @property
     def expected_info_emission_params(self):
@@ -593,16 +532,6 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
             raise NotImplementedError("Only supporting diagonal regression class with missing data now")
 
         return J_node, h_node
-
-    @property
-    def expected_extra_info_params(self):
-        params = super(_LDSStatesMaskedData, self).expected_extra_info_params
-
-        # Mask off missing data entries -- should work?
-        if self.mask is not None:
-            params = params[:-1] + (self.data * self.mask, )
-
-        return params
 
     def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
         if self.mask is None:
@@ -683,6 +612,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if not self.has_count_data:
             return super(_LDSStatesCountData, self).info_emission_params
 
+        raise Exception("This must be updated with log normalizers")
 
         # Otherwise, use the Polya-gamma augmentation
         # log p(y_{tn} | x, om)
@@ -722,6 +652,8 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if not self.has_count_data:
             return super(_LDSStatesCountData, self).extra_info_params
 
+        raise Exception("This must be updated with log normalizers")
+
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
@@ -751,13 +683,6 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             raise NotImplementedError("Mean field with count observations is not yet supported")
 
         return super(_LDSStatesCountData, self).expected_info_emission_params
-
-    @property
-    def expected_extra_info_params(self):
-        if self.has_count_data:
-            raise NotImplementedError("Mean field with count observations is not yet supported")
-
-        return super(_LDSStatesCountData, self).expected_extra_info_params
 
     def resample(self, niter=1):
         self.resample_gaussian_states()
@@ -910,6 +835,8 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     @property
     def info_emission_params(self):
+        raise Exception("This must be updated with log normalizers")
+
         T, D_latent, D_emission = self.T, self.D_latent, self.D_emission
 
         masked_data, inputs, omega = self.masked_data, self.inputs, self.omega
@@ -942,6 +869,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     @property
     def extra_info_params(self):
+        raise Exception("This must be updated with log normalizers")
         J_init = np.linalg.inv(self.sigma_init)
         h_init = np.linalg.solve(self.sigma_init, self.mu_init)
 
@@ -1191,10 +1119,6 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         self._normalizer, _, self.smoothed_sigmas, E_xtp1_xtT = \
             info_E_step(*self.info_params)
 
-        # self._normalizer += self._info_extra_loglike_terms(
-        #     *self.extra_info_params,
-        #     isdiag=self.diagonal_noise)
-
         self._set_expected_stats(
             self.gaussian_states, self.smoothed_sigmas, E_xtp1_xtT)
 
@@ -1265,10 +1189,6 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         # Zero out the linear term
         h_node = np.zeros((T, n))
         return J_node, h_node
-
-    @property
-    def expected_info_emission_params(self):
-        raise NotImplementedError
 
     def _set_expected_stats(self, mu, sigmas, E_xtp1_xtT):
         # Compute expectations!
@@ -1349,7 +1269,6 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
     # Smoothing
     def smooth(self):
         return np.exp(self.psi)
-
 
     # You would never call these, but we implemented them anyway
     def compute_full_hessian(self, mu):

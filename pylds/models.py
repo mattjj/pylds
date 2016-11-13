@@ -518,6 +518,9 @@ def random_rotation(n, theta=None):
         # Sample a random, slow rotation
         theta = 0.5 * np.pi * np.random.rand()
 
+    if n == 1:
+        return np.random.rand() * np.eye(1)
+
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
     out = np.zeros((n, n))
