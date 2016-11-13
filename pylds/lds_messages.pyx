@@ -627,7 +627,7 @@ cdef inline double condition_on_diagonal(
         # NOTE: the C arguments are treated as transposed because C is
         # assumed to be in C order
 
-        # Compute residual
+        # Compute residual y - C * mu_x - D * u
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         if d > 0:

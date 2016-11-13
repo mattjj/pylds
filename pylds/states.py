@@ -214,7 +214,6 @@ class _LDSStates(object):
 
     @property
     def info_emission_params(self):
-        # TODO: Check for diagonal emissions
         C = self.C
         centered_data = self.data - self.inputs.dot(self.D.T)
 
@@ -679,8 +678,11 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         return super(_LDSStatesCountData, self).expected_info_emission_params
 
     def log_likelihood(self):
-        return self.emission_distn.log_likelihood(
-            (np.hstack((self.gaussian_states, self.inputs)), self.data)).sum()
+        if self.has_count_data:
+            return self.emission_distn.log_likelihood(
+                (np.hstack((self.gaussian_states, self.inputs)), self.data)).sum()
+        else:
+            return super(_LDSStatesCountData, self).log_likelihood()
 
     def resample(self, niter=1):
         self.resample_gaussian_states()
