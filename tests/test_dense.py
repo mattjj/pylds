@@ -35,6 +35,9 @@ def bmat(blocks):
 
 
 def random_rotation(n,theta):
+    if n == 1:
+        return np.random.rand() * np.eye(1)
+
     rot = np.array([[np.cos(theta), -np.sin(theta)],
                     [np.sin(theta), np.cos(theta)]])
     out = np.zeros((n,n))
@@ -44,18 +47,21 @@ def random_rotation(n,theta):
 
 
 def lds_to_dense_infoparams(model,data,inputs):
-    T, n = data.shape[0], model.n
+    T, n = data.shape[0], model.D_latent
 
     mu_init, sigma_init = model.mu_init, model.sigma_init
     A, B, sigma_states = model.A, model.B,  model.sigma_states
     C, D, sigma_obs = model.C, model.D, model.sigma_obs
     ss_inv = np.linalg.inv(sigma_states)
 
-    h = C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
+    h = np.zeros((T,n))
+    h[0] += np.linalg.solve(sigma_init, mu_init)
+    # Dynamics
     h[1:] += inputs[:-1].dot(B.T).dot(ss_inv)
     h[:-1] += -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states, A))
+    # Emissions
+    h += C.T.dot(np.linalg.solve(sigma_obs, data.T)).T
     h += -inputs.dot(D.T).dot(np.linalg.solve(sigma_obs, C))
-    h[0] += np.linalg.solve(sigma_init, mu_init)
 
     J = np.kron(np.eye(T),C.T.dot(np.linalg.solve(sigma_obs,C)))
     J[:n,:n] += np.linalg.inv(sigma_init)
@@ -73,7 +79,7 @@ def lds_to_dense_infoparams(model,data,inputs):
 
 def same_means(model, Jh):
     J,h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     dense_mu = np.linalg.solve(J,h).reshape((T,n))
 
@@ -85,7 +91,7 @@ def same_means(model, Jh):
 
 def same_marginal_covs(model, Jh):
     J, h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)
     dense_sigmas = np.array([all_dense_sigmas[k*n:(k+1)*n,k*n:(k+1)*n]
@@ -99,7 +105,7 @@ def same_marginal_covs(model, Jh):
 
 def same_pairwise_secondmoments(model, Jh):
     J, h = Jh
-    n, T = model.n, model.states_list[0].T
+    n, T = model.D_latent, model.states_list[0].T
 
     all_dense_sigmas = np.linalg.inv(J)
     dense_mu = np.linalg.solve(J,h)
@@ -135,14 +141,15 @@ def same_loglike(model,_):
     dense_loglike = multivariate_normal.logpdf(data.ravel(),mu_y,sigma_y)
 
     model_loglike = model.log_likelihood()
-
+    if not np.isclose(dense_loglike, model_loglike):
+        print("model - dense: ", model_loglike - dense_loglike)
     assert np.isclose(dense_loglike, model_loglike)
 
 
 def random_model(n,p,d,T):
     data = np.random.randn(T,p)
     inputs = np.random.randn(T,d)
-    model = DefaultLDS(n,p,d)
+    model = DefaultLDS(p,n,d)
     model.A = 0.99*random_rotation(n,0.01)
     model.B = 0.1*np.random.randn(n,d)
     model.C = np.random.randn(p,n)

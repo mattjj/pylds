@@ -18,19 +18,25 @@ def rand_psd(n,k=None):
     return np.atleast_2d(out.dot(out.T))
 
 
-def generate_diag_model(n,p):
+def generate_diag_model(n,p,d):
     A = randn(n,n)
     A /= 2.*spectral_radius(A)  # ensures stability
     assert spectral_radius(A) < 1.
 
-    B = randn(n,n)
+    B = randn(n,d)
+
+    sigma_states = randn(n,n)
+    sigma_states = sigma_states.dot(sigma_states.T)
+
     C = randn(p,n)
-    d = rand(p)
+    D = randn(p,d)
+
+    sigma_obs = np.diag(rand(p)**2)
 
     mu_init = randn(n)
     sigma_init = rand_psd(n)
 
-    return A, B, C, d, mu_init, sigma_init
+    return A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init
 
 
 ###########
@@ -69,19 +75,18 @@ def test_cython_diagonal_plus_lowrank():
 
 # test condition_on_diagonal
 
-def cython_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
+def cython_condition_on_diagonal(mu_x, sigma_x, C, D, sigma_obs, u, y):
     mu_cond = np.random.randn(*mu_x.shape)
     sigma_cond = np.random.randn(*sigma_x.shape)
-    ll = test_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y, mu_cond, sigma_cond)
+    ll = test_condition_on_diagonal(mu_x, sigma_x, C, D, sigma_obs, u, y, mu_cond, sigma_cond)
     return ll, mu_cond, sigma_cond
 
 
-def check_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
-    def condition_on(mu_x, sigma_x, C, sigma_obs, y):
-        p, n = C.shape
+def check_condition_on_diagonal(mu_x, sigma_x, C, D, sigma_obs, u, y):
+    def condition_on(mu_x, sigma_x, C, D, sigma_obs, u, y):
         sigma_xy = sigma_x.dot(C.T)
         sigma_yy = C.dot(sigma_x).dot(C.T) + np.diag(sigma_obs)
-        mu_y = C.dot(mu_x)
+        mu_y = C.dot(mu_x) + D.dot(u)
         mu = mu_x + sigma_xy.dot(np.linalg.solve(sigma_yy, y - mu_y))
         sigma = sigma_x - sigma_xy.dot(np.linalg.solve(sigma_yy,sigma_xy.T))
 
@@ -89,45 +94,47 @@ def check_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y):
 
         return ll, mu, sigma
 
-    py_ll, py_mu, py_sigma = condition_on(mu_x, sigma_x, C, sigma_obs, y)
-    cy_ll, cy_mu, cy_sigma = cython_condition_on_diagonal(mu_x, sigma_x, C, sigma_obs, y)
+    py_ll, py_mu, py_sigma = condition_on(mu_x, sigma_x, C, D, sigma_obs, u, y)
+    cy_ll, cy_mu, cy_sigma = cython_condition_on_diagonal(mu_x, sigma_x, C, D, sigma_obs, u, y)
 
-    assert np.allclose(py_mu, cy_mu)
     assert np.allclose(py_sigma, cy_sigma)
+    assert np.allclose(py_mu, cy_mu)
     assert np.isclose(py_ll, cy_ll)
 
 
 def test_cython_condition_on_diagonal():
-    for _ in range(5):
-        n, p = randint(1,10), randint(1,10)
+    for _ in range(1):
+        n, p, d = randint(1,10), randint(1,10), 1
         mu_x = randn(n)
         sigma_x = rand_psd(n)
         C = randn(p,n)
+        D = randn(p,d)
         sigma_obs = rand(p)
+        u = randn(d)
         y = randn(p)
 
-        yield check_condition_on_diagonal, mu_x, sigma_x, C, sigma_obs, y
+        yield check_condition_on_diagonal, mu_x, sigma_x, C, D, sigma_obs, u, y
 
 
 # test filter_and_sample
 
-def check_filter_and_sample(A, B, C, d, mu_init, sigma_init, data):
+def check_filter_and_sample(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, inputs, data):
     rngstate = np.random.get_state()
     ll1, sample1 = filter_and_sample(
-        mu_init, sigma_init, A, B.dot(B.T), C, np.diag(d**2), data)
+        mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, inputs)
     np.random.set_state(rngstate)
     ll2, sample2 = filter_and_sample_diagonal(
-        mu_init, sigma_init, A, B.dot(B.T), C, d**2, data)
+        mu_init, sigma_init, A, B, sigma_states, C, D, np.diag(sigma_obs), inputs, data)
 
     assert np.isclose(ll1, ll2)
     assert np.allclose(sample1, sample2)
 
 
-def test_filter_and_sample():
-    for _ in range(5):
-        n, p, T = randint(1,5), randint(1,5), randint(10,20)
-        model = generate_diag_model(n,p)
-        data = generate_data(*(model + (T,)))
-        yield (check_filter_and_sample,) + model + (data,)
+# def test_filter_and_sample():
+#     for _ in range(5):
+#         n, p, d, T = randint(1,5), randint(1,5), randint(0,5), randint(10,20)
+#         model = generate_diag_model(n,p,d)
+#         data, inputs = generate_data(*(model + (T,)))
+#         yield (check_filter_and_sample,) + model + (inputs, data)
 
 

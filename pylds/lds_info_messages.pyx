@@ -25,10 +25,10 @@ from util cimport copy_transpose, copy_upper_lower
 #################################
 
 def kalman_info_filter(
-    double[:,:] J_init, double[:] h_init,
+    double[:,:] J_init, double[:] h_init, double log_Z_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
-    double[:,:] h_pair_1, double[:,:] h_pair_2,
-    double[:,:,:] J_node, double[:,:] h_node):
+    double[:,:] h_pair_1, double[:,:] h_pair_2, double[:] log_Z_pair,
+    double[:,:,:] J_node, double[:,:] h_node, double[:] log_Z_node):
 
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
@@ -44,33 +44,35 @@ def kalman_info_filter(
     # allocate output
     cdef double[:,:,::1] filtered_Js = np.empty((T,n,n))
     cdef double[:,::1] filtered_hs = np.empty((T,n))
-    cdef double lognorm = 0.
+    cdef double lognorm = 0
+
+    # Initialize
+    lognorm += log_Z_init
 
     # run filter forwards
     for t in range(T-1):
-        info_condition_on(
-            J_predict, h_predict, J_node[t], h_node[t],
+        lognorm += info_condition_on(
+            J_predict, h_predict, J_node[t], h_node[t], log_Z_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
             filtered_Js[t], filtered_hs[t],
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            h_pair_1[t], h_pair_2[t],
+            h_pair_1[t], h_pair_2[t], log_Z_pair[t],
             J_predict, h_predict,
             temp_n, temp_nn, temp_nn2)
-    info_condition_on(
-        J_predict, h_predict, J_node[T-1], h_node[T-1],
+    lognorm += info_condition_on(
+        J_predict, h_predict, J_node[T-1], h_node[T-1], log_Z_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
     lognorm += info_lognorm(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
 
     return lognorm, np.asarray(filtered_Js), np.asarray(filtered_hs)
 
-
 def info_E_step(
-    double[:,::1] J_init, double[::1] h_init,
+    double[:,::1] J_init, double[::1] h_init, double log_Z_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
-    double[:,:] h_pair_1, double[:,:] h_pair_2,
-    double[:,:,:] J_node, double[:,:] h_node):
+    double[:,:] h_pair_1, double[:,:] h_pair_2, double[:] log_Z_pair,
+    double[:,:,:] J_node, double[:,:] h_node, double[:] log_Z_node):
 
     # allocate temporaries and internals
     cdef int T = J_node.shape[0], n = J_node.shape[1]
@@ -91,21 +93,24 @@ def info_E_step(
     cdef double[:,:,::1] ExnxT = np.empty((T-1,n,n))  # 'n' for next
     cdef double lognorm = 0.
 
+    # initialize
+    lognorm += log_Z_init
+
     # run filter forwards
     predict_Js[0,:,:] = J_init
     predict_hs[0,:] = h_init
     for t in range(T-1):
-        info_condition_on(
-            predict_Js[t], predict_hs[t], J_node[t], h_node[t],
+        lognorm += info_condition_on(
+            predict_Js[t], predict_hs[t], J_node[t], h_node[t], log_Z_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
             filtered_Js[t], filtered_hs[t],
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            h_pair_1[t], h_pair_2[t],
+            h_pair_1[t], h_pair_2[t], log_Z_pair[t],
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
-    info_condition_on(
-        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1],
+    lognorm += info_condition_on(
+        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1], log_Z_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
     lognorm += info_lognorm(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
@@ -129,10 +134,10 @@ def info_E_step(
 
 
 def info_sample(
-    double[:,::1] J_init, double[::1] h_init,
+    double[:,::1] J_init, double[::1] h_init, double log_Z_init,
     double[:,:,:] J_pair_11, double[:,:,:] J_pair_21, double[:,:,:] J_pair_22,
-    double[:,:] h_pair_1, double[:,:] h_pair_2,
-    double[:,:,:] J_node, double[:,:] h_node):
+    double[:,:] h_pair_1, double[:,:] h_pair_2, double[:] log_Z_pair,
+    double[:,:,:] J_node, double[:,:] h_node, double[:] log_Z_node):
 
     cdef int T = J_node.shape[0], n = J_node.shape[1]
     cdef int t
@@ -154,21 +159,24 @@ def info_sample(
     cdef int inc = 1
     cdef double neg1 = -1., one = 1., zero = 0.
 
+    # initialize
+    lognorm += log_Z_init
+
     # run filter forwards
     predict_Js[0,:,:] = J_init
     predict_hs[0,:] = h_init
     for t in range(T-1):
-        info_condition_on(
-            predict_Js[t], predict_hs[t], J_node[t], h_node[t],
+        lognorm += info_condition_on(
+            predict_Js[t], predict_hs[t], J_node[t], h_node[t], log_Z_node[t],
             filtered_Js[t], filtered_hs[t])
         lognorm += info_predict(
             filtered_Js[t], filtered_hs[t],
             J_pair_11[t], J_pair_21[t], J_pair_22[t],
-            h_pair_1[t], h_pair_2[t],
+            h_pair_1[t], h_pair_2[t], log_Z_pair[t],
             predict_Js[t+1], predict_hs[t+1],
             temp_n, temp_nn, temp_nn2)
-    info_condition_on(
-        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1],
+    lognorm += info_condition_on(
+        predict_Js[T-1], predict_hs[T-1], J_node[T-1], h_node[T-1], log_Z_node[T-1],
         filtered_Js[T-1], filtered_hs[T-1])
     lognorm += info_lognorm(
         filtered_Js[T-1], filtered_hs[T-1], temp_n, temp_nn)
@@ -183,7 +191,7 @@ def info_sample(
               &inc, &one, &temp_n[0], &inc)
 
         info_condition_on(
-            filtered_Js[t], filtered_hs[t], J_pair_11[t], temp_n,
+            filtered_Js[t], filtered_hs[t], J_pair_11[t], temp_n, 0,
             filtered_Js[t], filtered_hs[t])
         info_sample_gaussian(filtered_Js[t], filtered_hs[t], randseq[t])
 
@@ -194,9 +202,10 @@ def info_sample(
 #  information-form util  #
 ###########################
 
-cdef inline void info_condition_on(
+cdef inline double info_condition_on(
     double[:,:] J1, double[:] h1,
     double[:,:] J2, double[:] h2,
+    double log_Z,
     double[:,:] Jout, double[:] hout,
     ) nogil:
     cdef int n = J1.shape[0]
@@ -209,11 +218,13 @@ cdef inline void info_condition_on(
         for j in range(n):
             Jout[i,j] = J1[i,j] + J2[i,j]
 
+    return log_Z
+
 
 cdef inline double info_predict(
     double[:,:] J, double[:] h,
     double[:,:] J11, double[:,:] J21, double[:,:] J22,
-    double[:] h1, double[:] h2,
+    double[:] h1, double[:] h2, double log_Z,
     double[:,:] Jpredict, double[:] hpredict,
     double[:] temp_n, double[:,:] temp_nn, double[:,:] temp_nn2,
     ) nogil:
@@ -239,7 +250,13 @@ cdef inline double info_predict(
     dcopy(&n, &h2[0], &inc, &hpredict[0], &inc)
     dcopy(&nn, &J21[0,0], &inc, &temp_nn2[0,0], &inc)
 
-    lognorm += info_lognorm_destructive(temp_nn, temp_n)  # mutates temp_n and temp_nn
+    # Inputs: temp_nn = J_{t|t} + J_11
+    #         temp_n  = h_{t|t} + h_1
+    # L = cholesky(J_{t|t} + J_11)
+    # v = solve_triangular(L, h_{t|t} + h_1)
+    # lognorm = 1./2 * np.dot(v,v) - np.sum(np.log(np.diag(L)))
+    lognorm += info_lognorm_destructive(temp_nn, temp_n)
+    # mutates temp_n and temp_nn
     # Now temp_nn = chol(J+J11), temp_n = chol(J+J11)^{-1} (h+h1)
     # Solve again so that temp_n = (J+J11)^{-1} (h+h1)
     dtrtrs('L', 'T', 'N', &n, &inc, &temp_nn[0,0], &n, &temp_n[0], &n, &info)
@@ -254,7 +271,7 @@ cdef inline double info_predict(
     dgemm('T', 'N', &n, &n, &n, &neg1, &temp_nn2[0,0], &n, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
     # dsyrk('L', 'T', &n, &n, &neg1, &temp_nn2[0,0], &n, &one, &Jpredict[0,0], &n)
 
-    return lognorm
+    return lognorm + log_Z
 
 
 cdef inline double info_lognorm_destructive(double[:,:] J, double[:] h) nogil:
@@ -385,9 +402,9 @@ cdef inline void info_sample_gaussian(
 #  test bindings  #
 ###################
 
-def info_predict_test(J,h,J11,J21,J22,h1,h2,Jpredict,hpredict):
+def info_predict_test(J,h,J11,J21,J22,h1,h2,logZ, Jpredict,hpredict):
     temp_n = np.random.randn(*h.shape)
     temp_nn = np.random.randn(*J.shape)
     temp_nn2 = np.random.randn(*J.shape)
 
-    return info_predict(J,h,J11,J21,J22,h1,h2,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)
+    return info_predict(J,h,J11,J21,J22,h1,h2,logZ,Jpredict,hpredict,temp_n,temp_nn,temp_nn2)

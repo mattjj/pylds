@@ -1,123 +1,82 @@
-from __future__ import division
 import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import Regression, AutoRegression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import LDS, DefaultLDS
+from pylds.models import DefaultLDS
 
 npr.seed(0)
 
-
-#########################
-#  set some parameters  #
-#########################
-
-p = 1
-n = 2
-d = 1
+# Set parameters
+D_obs = 1
+D_latent = 2
+D_input = 1
 T = 2000
 
-mu_init = np.array([0.,1.])
-sigma_init = 0.01*np.eye(2)
-
-A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
-                   [np.sin(np.pi/24),  np.cos(np.pi/24)]])
-B = np.ones((n,d))
-sigma_states = 0.01*np.eye(2)
-
-C = np.array([[5.,0.]])
-D = np.zeros((p,d))
-sigma_obs = np.eye(1)
-
-###################
-#  generate data  #
-###################
-
-truemodel = LDS(
-    dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
-    emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
-
-inputs = np.random.randn(T,d)
+# Simulate from one LDS
+truemodel = DefaultLDS(D_obs, D_latent, D_input)
+inputs = np.random.randn(T, D_input)
 data, stateseq = truemodel.generate(T, inputs=inputs)
-smooth_data = stateseq.dot(C.T) + inputs.dot(D.T)
 
-###############
-# test models #
-###############
-# Model without input
-noinput_model = LDS(
-    dynamics_distn=Regression(nu_0=n + 2, S_0=n * np.eye(n),
-                              M_0=np.zeros((n, n)), K_0=n*np.eye(n)),
-    emission_distn=Regression(nu_0=p+1, S_0=p*np.eye(p),
-                              M_0=np.zeros((p, n)), K_0=n*np.eye(n)))
-noinput_model.add_data(data, inputs=None)
-
-# Make a model with inputs
-input_model = LDS(
-    dynamics_distn=Regression(nu_0=n + 2, S_0=n * np.eye(n),
-                              M_0=np.zeros((n, n+d)), K_0=(n+d) * np.eye(n+d)),
-    emission_distn=Regression(nu_0=p+1, S_0=p*np.eye(p),
-                              M_0=np.zeros((p, n+d)), K_0=(n+d)*np.eye(n+d)))
+# Fit with another LDS
+input_model = DefaultLDS(D_obs, D_latent, D_input)
 input_model.add_data(data, inputs=inputs)
 
-###############
-#  fit models #
-###############
-N_samples = 100
+# Fit a separate model without the inputs
+noinput_model = DefaultLDS(D_obs, D_latent, D_input=0)
+noinput_model.add_data(data)
+
+# Run the Gibbs sampler
 def update(model):
     model.resample_model()
     return model.log_likelihood()
 
-true_ll = truemodel.log_likelihood()
-noinput_lls = [update(noinput_model) for _ in progprint_xrange(N_samples)]
-input_lls = [update(input_model) for _ in progprint_xrange(N_samples)]
+input_lls = [update(input_model) for _ in progprint_xrange(100)]
+noinput_lls = [update(noinput_model) for _ in progprint_xrange(100)]
 
-plt.figure(figsize=(3,4))
-plt.plot(noinput_lls, label="no input")
-plt.plot(input_lls, label="input")
-plt.plot([0, N_samples], [true_ll, true_ll], label="true")
-plt.legend(loc="lower right")
+# Plot the log likelihoods
+plt.figure()
+plt.plot(input_lls, label="with inputs")
+plt.plot(noinput_lls, label="wo inputs")
 plt.xlabel('iteration')
-plt.ylabel('log likelihood')
+plt.ylabel('training likelihood')
+plt.legend()
 
+# Predict forward in time
+T_given = 1800
+T_predict = 200
+given_data= data[:T_given]
+given_inputs = inputs[:T_given]
 
-################
-#  smoothing   #
-################
-input_xs = input_model.smooth(data, inputs)
-noinput_xs = noinput_model.smooth(data)
-
-plt.figure()
-plt.plot(smooth_data, 'b-', label="true")
-plt.plot(input_xs, 'r--', label="with input")
-plt.plot(noinput_xs, 'g--', label="wo input")
-plt.xlabel("Time")
-plt.ylabel("Smoothed Data")
-
-################
-#  predicting  #
-################
-
-Nseed = 1700
-Npredict = 100
-prediction_seed = data[:Nseed]
-
-input_preds = \
+preds = \
     input_model.sample_predictions(
-        prediction_seed, Npredict,
-        inputs=inputs[Nseed:Nseed+Npredict])
-noinput_preds = \
-    noinput_model.sample_predictions(
-        prediction_seed, Npredict)
+        given_data, inputs=given_inputs,
+        Tpred=T_predict,
+        inputs_pred=inputs[T_given:T_given + T_predict])
+
+# Plot the predictions
+plt.figure()
+plt.plot(np.arange(T), data, 'b-', label="true")
+plt.plot(T_given + np.arange(T_predict), preds, 'r--', label="prediction")
+ylim = plt.ylim()
+plt.plot([T_given, T_given], ylim, '-k')
+plt.xlabel('time index')
+plt.xlim(max(0, T_given - 200), T)
+plt.ylabel('prediction')
+plt.ylim(ylim)
+plt.legend()
+
+# Smooth the data
+input_ys = input_model.smooth(data, inputs)
+noinput_ys = noinput_model.smooth(data)
 
 plt.figure()
-plt.plot(data, 'b-')
-plt.plot(Nseed + np.arange(Npredict), input_preds, 'r--')
-plt.plot(Nseed + np.arange(Npredict), noinput_preds, 'g--')
-plt.xlabel('time index')
-plt.ylabel('prediction')
+plt.plot(data, 'b-', label="true")
+plt.plot(input_ys, 'r-', lw=2, label="with input")
+plt.xlabel("Time")
+plt.xlim(max(0, T_given-200), T)
+plt.ylabel("Smoothed Data")
+plt.legend()
 
 plt.show()

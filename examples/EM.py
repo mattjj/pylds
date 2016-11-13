@@ -3,95 +3,66 @@ import numpy as np
 import numpy.random as npr
 import matplotlib.pyplot as plt
 
-from pybasicbayes.distributions import Regression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import LDS, DefaultLDS
+from pylds.models import DefaultLDS
 
 npr.seed(0)
 
-
-#########################
-#  set some parameters  #
-#########################
-
-p = 1
-n = 2
-d = 1
+# Set parameters
+D_obs = 1
+D_latent = 2
+D_input = 0
 T = 2000
 
-mu_init = np.array([0.,1.])
-sigma_init = 0.01*np.eye(2)
-
-A = 0.99*np.array([[np.cos(np.pi/24), -np.sin(np.pi/24)],
-                   [np.sin(np.pi/24),  np.cos(np.pi/24)]])
-B = np.ones((n,d))
-sigma_states = 0.01*np.eye(2)
-
-C = np.array([[10.,0.]])
-D = np.zeros((p,d))
-sigma_obs = 0.01*np.eye(1)
-
-###################
-#  generate data  #
-###################
-
-truemodel = LDS(
-    dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
-    emission_distn=Regression(A=np.hstack((C,D)), sigma=sigma_obs))
-
-inputs = np.random.randn(T,d)
+# Simulate from one LDS
+truemodel = DefaultLDS(D_obs, D_latent, D_input)
+inputs = np.random.randn(T, D_input)
 data, stateseq = truemodel.generate(T, inputs=inputs)
 
-###############
-# test models #
-###############
-model = LDS(
-    dynamics_distn=Regression(nu_0=n + 2, S_0=n * np.eye(n),
-                              M_0=np.zeros((n, n+d)), K_0=(n+d) * np.eye(n+d)),
-    emission_distn=Regression(nu_0=p+1, S_0=p*np.eye(p),
-                              M_0=np.zeros((p, n+d)), K_0=(n+d)*np.eye(n+d)))
+# Fit with another LDS
+model = DefaultLDS(D_obs, D_latent, D_input)
 model.add_data(data, inputs=inputs)
 
-###############
-#  fit model  #
-###############
+# Initialize with a few iterations of Gibbs
+for _ in progprint_xrange(10):
+    model.resample_model()
 
+# Run EM
 def update(model):
     model.EM_step()
     return model.log_likelihood()
 
+lls = [update(model) for _ in progprint_xrange(50)]
 
-for _ in progprint_xrange(10):
-    model.resample_model()
-
-likes = [update(model) for _ in progprint_xrange(50)]
-
-plt.figure(figsize=(3,4))
-plt.plot(likes)
+# Plot the log likelihoods
+plt.figure()
+plt.plot(lls)
 plt.xlabel('iteration')
 plt.ylabel('training likelihood')
 
-
-################
-#  predicting  #
-################
-
-Nseed = 1700
-Npredict = 100
-prediction_seed = data[:Nseed]
+# Predict forward in time
+T_given = 1800
+T_predict = 200
+given_data= data[:T_given]
+given_inputs = inputs[:T_given]
 
 preds = \
     model.sample_predictions(
-        prediction_seed, Npredict,
-        inputs=inputs[Nseed:Nseed+Npredict])
+        given_data, inputs=given_inputs,
+        Tpred=T_predict,
+        inputs_pred=inputs[T_given:T_given + T_predict])
 
+# Plot the predictions
 plt.figure()
-plt.plot(data, 'b-')
-plt.plot(Nseed + np.arange(Npredict), preds, 'r--')
-# plt.plot(Nseed + np.arange(Npredict), noinput_preds, 'g--')
+plt.plot(np.arange(T), data, 'b-', label="true")
+plt.plot(T_given + np.arange(T_predict), preds, 'r--', label="prediction")
+ylim = plt.ylim()
+plt.plot([T_given, T_given], ylim, '-k')
 plt.xlabel('time index')
+plt.xlim(max(0, T_given - 200), T)
 plt.ylabel('prediction')
-
+plt.ylim(ylim)
+plt.legend()
 plt.show()
 
