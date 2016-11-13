@@ -227,7 +227,7 @@ class _LDSStates(object):
             J_node = C.T.dot(RinvC)
             h_node = centered_data.dot(RinvC)
 
-            log_Z_node += -np.sum(np.log(rsq))
+            log_Z_node -= 1./2 * np.sum(np.log(rsq))
             log_Z_node -= 1./2 * np.sum(centered_data**2 * 1./rsq, axis=1)
 
         else:
@@ -352,7 +352,6 @@ class _LDSStatesGibbs(_LDSStates):
 class _LDSStatesMeanField(_LDSStates):
     @property
     def expected_info_dynamics_params(self):
-        raise Exception("This must be updated with log normalizers")
         J_pair_22, J_pair_21, J_pair_11, logdet_pair = \
             self.dynamics_distn.meanfield_expectedstats()
 
@@ -361,38 +360,47 @@ class _LDSStatesMeanField(_LDSStates):
         E_Qinv = J_pair_22.copy("C")
         E_AT_Qinv = (J_pair_21[:,:n].T).copy("C")
         E_BT_Qinv = (J_pair_21[:,n:].T).copy("C")
-        E_BT_Qinv_A = J_pair_11[n:,:n].copy("C")
         E_AT_Qinv_A = J_pair_11[:n,:n].copy("C")
+        E_BT_Qinv_A = J_pair_11[n:,:n].copy("C")
+        E_BT_Qinv_B = J_pair_11[n:,n:].copy("C")
 
         h_pair_1 = (-self.inputs.dot(E_BT_Qinv_A)).copy("C")
         h_pair_2 = (self.inputs.dot(E_BT_Qinv)).copy("C")
 
-        return E_AT_Qinv_A, -E_AT_Qinv, E_Qinv, h_pair_1, h_pair_2
+        log_Z_pair = 1./2 * logdet_pair * np.ones(self.T-1)
+        log_Z_pair -= self.D_latent / 2. * np.log(2 * np.pi)
+        log_Z_pair -= 1. / 2 * np.einsum('ij,ti,tj->t', E_BT_Qinv_B, self.inputs[:-1], self.inputs[:-1])
+
+        return E_AT_Qinv_A, -E_AT_Qinv, E_Qinv, h_pair_1, h_pair_2, log_Z_pair
 
     @property
     def expected_info_emission_params(self):
-        raise Exception("This must be updated with log normalizers")
-        # TODO: Use the fact that the diagonalregression prior is factorized
-        # E_C, E_CCT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
-        # E_C, E_D = E_C[:, :self.n], E_C[:, self.n:]
-        # E_CCT_vec = E_CCT.reshape(self.p, -1)
-        #
-        # J_obs = self.mask * E_sigmasq_inv
-        # J_node = (np.dot(J_obs, E_CCT_vec)).reshape((self.T, self.n, self.n))
-        # h_node = (self.data * J_obs).dot(E_C) - (self.inputs.dot(E_D.T) * J_obs).dot(E_C)
-
         J_yy, J_yx, J_node, logdet_node = \
             self.emission_distn.meanfield_expectedstats()
 
         n = self.D_latent
+        E_Rinv = J_yy
         E_Rinv_C = J_yx[:,:n].copy("C")
+        E_Rinv_D = J_yx[:,n:].copy("C")
+        E_CT_Rinv_C = (J_node[:n,:n]).copy("C")
         E_DT_Rinv_C = (J_node[n:,:n]).copy("C")
-        E_CT_Rinv_C = J_node[:n,:n].copy("C")
+        E_DT_Rinv_D = (J_node[n:,n:]).copy("C")
 
         h_node = self.data.dot(E_Rinv_C)
         h_node -= self.inputs.dot(E_DT_Rinv_C)
 
-        return E_CT_Rinv_C, h_node
+        log_Z_node = -self.D_emission / 2. * np.log(2 * np.pi) * np.ones(self.T)
+        log_Z_node += 1. / 2 * logdet_node
+
+        # E[(y-Du)^T R^{-1} (y-Du)]
+        log_Z_node -= 1. / 2 * np.einsum('ij,ti,tj->t', E_Rinv,
+                                         self.data, self.data)
+        log_Z_node -= 1. / 2 * np.einsum('ij,ti,tj->t', -2*E_Rinv_D,
+                                         self.data, self.inputs)
+        log_Z_node -= 1. / 2 * np.einsum('ij,ti,tj->t', E_DT_Rinv_D,
+                                         self.inputs, self.inputs)
+
+        return E_CT_Rinv_C, h_node, log_Z_node
 
     @property
     def expected_info_params(self):
@@ -400,36 +408,9 @@ class _LDSStatesMeanField(_LDSStates):
                self.expected_info_dynamics_params + \
                self.expected_info_emission_params
 
-    @property
-    def expected_extra_info_params(self):
-        n = self.D_latent
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-
-        _, _, J_pair_11, logdet_pair = self.dynamics_distn.meanfield_expectedstats()
-        hJh_pair = J_pair_11[n:, n:]
-
-        # Observations
-        if self.diagonal_noise:
-            _, mf_E_CCT, mf_E_sigmasq_inv, mf_E_log_sigmasq = self.emission_distn.mf_expectations
-            J_yy = mf_E_sigmasq_inv
-            logdet_node = -np.sum(mf_E_log_sigmasq)
-
-            mf_E_DDT = mf_E_CCT[:,n:,n:]
-            hJh_node = np.sum(mf_E_DDT * mf_E_sigmasq_inv[:,None,None], axis=0)
-        else:
-            J_yy, _, J_node, logdet_node = \
-                self.emission_distn.meanfield_expectedstats()
-            hJh_node = J_node[n:, n:]
-
-        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, self.data
-
     def meanfieldupdate(self):
         self._mf_lds_normalizer, self.smoothed_mus, self.smoothed_sigmas, \
             E_xtp1_xtT = info_E_step(*self.expected_info_params)
-
-        self._mf_lds_normalizer += LDSStates._info_extra_loglike_terms(
-            *self.expected_extra_info_params, isdiag=self.diagonal_noise)
 
         self._set_expected_stats(
             self.smoothed_mus,self.smoothed_sigmas,E_xtp1_xtT)
@@ -474,42 +455,60 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
 
     @property
     def _info_emission_params_diag(self):
-        raise Exception("This must be updated with log normalizers")
         C, D = self.C, self.D
         sigmasq = self.emission_distn.sigmasq_flat
         J_obs = self.mask / sigmasq
+        centered_data = self.data - self.inputs.dot(D.T)
 
         CCT = np.array([np.outer(cp, cp) for cp in C]).\
             reshape((self.D_emission, self.D_latent ** 2))
 
         J_node = np.dot(J_obs, CCT)
-        # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
-        h_node = (self.data * J_obs).dot(C)
-        if self.D_input > 0:
-            h_node -= (self.inputs.dot(D.T) * J_obs).dot(C)
-
         J_node = J_node.reshape((self.T, self.D_latent, self.D_latent))
-        return J_node, h_node
+
+        # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
+        h_node = (centered_data * J_obs).dot(C)
+
+        log_Z_node = -self.D_emission / 2. * np.log(2 * np.pi) * np.ones(self.T)
+        log_Z_node -= 1. / 2 * np.sum(np.log(sigmasq))
+        log_Z_node -= 1. / 2 * np.sum(centered_data ** 2 * J_obs, axis=1)
+
+        return J_node, h_node, log_Z_node
 
     @property
     def _info_emission_params_dense(self):
-        raise Exception("This must be updated with log normalizers")
+        # raise Exception("This must be updated with log normalizers")
         T, D_latent = self.T, self.D_latent
         data, inputs, mask = self.data, self.inputs, self.mask
 
         C, D, R = self.C, self.D, self.sigma_obs
-        Rinv = np.linalg.inv(R)
+        centered_data = data - inputs.dot(D.T)
 
         # Sloowwwwww
         J_node = np.zeros((T, D_latent, D_latent))
         h_node = np.zeros((T, D_latent))
+        log_Z_node = np.zeros(T)
         for t in range(T):
-            Rinv_t = Rinv * np.outer(mask[t], mask[t])
-            J_node[t] = C.T.dot(Rinv_t).dot(C)
-            h_node[t] = (data[t] - inputs[t].dot(D.T)).dot(Rinv_t).dot(C)
+            m_t = mask[t].sum()
+            if m_t == 0:
+                continue
+
+            centered_data_t = centered_data[t][mask[t]]
+            C_t = C[mask[t]]
+            R_t = R[np.ix_(mask[t], mask[t])]
+            Rinv_t = np.linalg.inv(R_t)
+
+            J_node[t] = C_t.T.dot(Rinv_t).dot(C_t)
+            h_node[t] = (centered_data_t).dot(Rinv_t).dot(C_t)
+
+            log_Z_node[t] -= m_t / 2. * np.log(2 * np.pi)
+            log_Z_node[t] -= 1. / 2 * np.linalg.slogdet(R_t)[1]
+            log_Z_node[t] -= 1. / 2 * centered_data_t.dot(Rinv_t).dot(centered_data_t)
 
         J_node = J_node.reshape((self.T, self.D_latent, self.D_latent))
-        return J_node, h_node
+
+
+        return J_node, h_node, log_Z_node
 
     @property
     def expected_info_emission_params(self):
@@ -517,9 +516,12 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         if self.mask is None:
             return super(_LDSStatesMaskedData, self).expected_info_emission_params
 
+        raise Exception("Mean field for masked data is not implemented correctly. We need to handle "
+                        "inputs properly, and we need to ravel E_CCT to make the dot product work.")
         if self.diagonal_noise:
-            E_C, E_CCT, E_sigmasq_inv, _ = self.emission_distn.mf_expectations
+            E_C, E_CDCDT, E_sigmasq_inv, E_logdet_node = self.emission_distn.mf_expectations
             E_C, E_D = E_C[:,:n], E_C[:,n:]
+            E_CCT = E_CDCDT[:n, :n]
             J_obs = self.mask * E_sigmasq_inv
 
             J_node = np.dot(J_obs, E_CCT)
@@ -527,6 +529,18 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
             h_node -= (self.inputs.dot(E_D.T) * J_obs).dot(E_C)
 
             J_node = J_node.reshape((self.T, self.D_latent, self.D_latent))
+
+            log_Z_node = -self.D_emission / 2. * np.log(2 * np.pi) * np.ones(self.T)
+            log_Z_node += 1. / 2 * E_logdet_node
+
+            # E[(y-Du)^T R^{-1} (y-Du)]
+            # E[yT R^{-1}y  -2 y^T R^{-1} Du + u^T D^T R^{-1} D u ]
+            log_Z_node -= 1./2 * (self.data * J_obs).T.dot(self.data)
+
+            log_Z_node -= 1. / 2 * np.einsum('ij,ti,tj->t', -2 * E_Rinv_D,
+                                             self.data, self.inputs)
+            log_Z_node -= 1. / 2 * np.einsum('ij,ti,tj->t', E_DT_Rinv_D,
+                                             self.inputs, self.inputs)
 
         else:
             raise NotImplementedError("Only supporting diagonal regression class with missing data now")
@@ -612,8 +626,6 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if not self.has_count_data:
             return super(_LDSStatesCountData, self).info_emission_params
 
-        raise Exception("This must be updated with log normalizers")
-
         # Otherwise, use the Polya-gamma augmentation
         # log p(y_{tn} | x, om)
         #   = -0.5 * om_{tn} * (c_n^T x_t + d_n^T u_t + b_n)**2
@@ -645,37 +657,19 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
         kappa = emission_distn.kappa_func(data)
         h_node = ((kappa - omega * b.T - omega * inputs.dot(D.T)) * mask).dot(C)
-        return J_node, h_node
 
-    @property
-    def extra_info_params(self):
-        if not self.has_count_data:
-            return super(_LDSStatesCountData, self).extra_info_params
+        # TODO: Implement the log normalizer for the Polya-gamma augmentation
+        # after augmentation, the normalizer includes the terms in the PG
+        # augmented density that do not contain x. Specifically, we have,
+        #
+        #     logZ = -b(y) log 2 - log PG(omega | b(y), 0) - log c(y),
+        #
+        # where b(y) and c(y) come from the count distribution. The hard part is
+        # that the PG density is expensive to evaluate. For now, we will just
+        # ignore all these terms.
+        log_Z_node = np.zeros(self.T)
 
-        raise Exception("This must be updated with log normalizers")
-
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-
-        Q = self.sigma_states
-        logdet_pair = -np.linalg.slogdet(Q)[1]
-
-        # We need terms for u_t B^T Q^{-1} B u
-        B = self.B
-        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
-
-        # TODO: Observations
-        warn("extra_info_params not implemented for count data. "
-             "Log likelihood calculations will be wrong.")
-        J_yy = np.zeros((self.D_emission, self.D_emission))
-        logdet_node = np.zeros((self.T))
-        hJh_node = np.zeros((self.D_input, self.D_input))
-
-        masked_data = self.data * self.mask \
-            if self.mask is not None \
-            else self.data
-
-        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, masked_data
+        return J_node, h_node, log_Z_node
 
     @property
     def expected_info_emission_params(self):
@@ -683,6 +677,10 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             raise NotImplementedError("Mean field with count observations is not yet supported")
 
         return super(_LDSStatesCountData, self).expected_info_emission_params
+
+    def log_likelihood(self):
+        return self.emission_distn.log_likelihood(
+            (np.hstack((self.gaussian_states, self.inputs)), self.data)).sum()
 
     def resample(self, niter=1):
         self.resample_gaussian_states()
@@ -835,8 +833,6 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     @property
     def info_emission_params(self):
-        raise Exception("This must be updated with log normalizers")
-
         T, D_latent, D_emission = self.T, self.D_latent, self.D_emission
 
         masked_data, inputs, omega = self.masked_data, self.inputs, self.omega
@@ -864,39 +860,10 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             h_node[t] -= (om_t * b[ns_t][:,0]).dot(C[ns_t])
             h_node[t] -= (om_t * inputs[t].dot(D[ns_t].T)).dot(C[ns_t])
 
-        return J_node, h_node
+        # TODO: See comment in _LDSStatesCountData for info on the log normalizers
+        log_Z_node = np.zeros(self.T)
 
-
-    @property
-    def extra_info_params(self):
-        raise Exception("This must be updated with log normalizers")
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.linalg.solve(self.sigma_init, self.mu_init)
-
-        Q = self.sigma_states
-        logdet_pair = -np.linalg.slogdet(Q)[1]
-
-        # We need terms for u_t B^T Q^{-1} B u
-        B = self.B
-        hJh_pair = B.T.dot(np.linalg.solve(Q, B))
-
-        # warn("extra_info_params not implemented for count data. "
-        #      "Log likelihood calculations will be wrong.")
-        # J_yy = np.zeros((self.D_emission, self.D_emission))
-        # logdet_node = np.zeros((self.T))
-        # hJh_node = np.zeros((self.D_input, self.D_input))
-        #
-        # masked_data = self.data * self.mask \
-        #     if self.mask is not None \
-        #     else self.data
-
-        # TODO: Fix this up
-        J_yy = np.zeros((self.D_emission, self.D_emission))
-        logdet_node = np.zeros((self.T))
-        hJh_node = np.zeros((self.D_input, self.D_input))
-        masked_data = np.zeros((self.T, self.D_emission))
-
-        return J_init, h_init, logdet_pair, hJh_pair, J_yy, logdet_node, hJh_node, self.inputs, masked_data
+        return J_node, h_node, log_Z_node
 
     @property
     def expected_info_emission_params(self):
@@ -1175,20 +1142,29 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         mask = self.mask
         T, n, p = self.T, self.D_latent, self.D_emission
         C, b = self.C, self.b
+        M = mask.sum(1) if mask is not None else p * np.ones(T)
 
         # Precompute a few bits
         Cout = np.array([np.outer(C[i], C[i]) for i in range(p)])
         lmbda = np.exp(mu.dot(C.T) + b.T)
 
+        # Initialize params. Note: the linear term will be zero in this case.
         J_node = np.zeros((T, n, n))
+        h_node = np.zeros((T, n))
+
+        log_Z_node = np.zeros(self.T)
         for t in range(T):
+            if M[t] == 0:
+                continue
+
             w = mask[t] * lmbda[t] if mask is not None else lmbda[t]
             J_node[t] = (w[:, None, None] * Cout).sum(0)
 
+            # Compute the log normalizer
+            log_Z_node[t] = -M[t] / 2. * np.log(2 * np.pi)
+            log_Z_node[t] += 1. / 2 * np.linalg.slogdet(J_node[t])[1]
 
-        # Zero out the linear term
-        h_node = np.zeros((T, n))
-        return J_node, h_node
+        return J_node, h_node, log_Z_node
 
     def _set_expected_stats(self, mu, sigmas, E_xtp1_xtT):
         # Compute expectations!
@@ -1261,7 +1237,7 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         for i in range(num_samples):
             _, zs = \
                 info_sample(
-                    J_init, h_init, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, J_node, h_node)
+                    J_init, h_init, 0, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, 0, J_node, h_node, 0)
             samples[i] = mu + zs
 
         return samples
