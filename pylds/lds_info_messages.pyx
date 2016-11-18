@@ -13,7 +13,7 @@ from numpy.math cimport INFINITY, PI
 from scipy.linalg.cython_blas cimport dsymm, dcopy, dgemm, dgemv, daxpy, dsyrk, \
     dtrmv, dger, dnrm2, ddot
 from scipy.linalg.cython_lapack cimport dpotrf, dpotrs, dpotri, dtrtrs
-from util cimport copy_transpose, copy_upper_lower
+from cyutil cimport copy_transpose, copy_upper_lower
 
 
 # TODO instead of specializing last step in info filtering and rts, we could

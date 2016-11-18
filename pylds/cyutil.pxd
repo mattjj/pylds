@@ -44,4 +44,4 @@ cdef inline void copy_upper_lower(int n, floating *x) nogil:
     for i in range(n):
         for j in range(i):
             x[n*i+j] = x[n*j+i]
-
+            

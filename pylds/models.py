@@ -5,20 +5,14 @@ from scipy.sparse import csr_matrix
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField, ModelMeanFieldSVI
 
-from pybasicbayes.distributions import DiagonalRegression
-
+from pybasicbayes.distributions import DiagonalRegression, Gaussian, Regression
+from pylds.distributions import PoissonRegression
 from pylds.states import LDSStates, LDSStatesZeroInflatedCountData, LaplaceApproxPoissonLDSStates
+from pylds.util import random_rotation
 
-# TODO make separate versions for stationary, nonstationary,
-# nonstationary-and-distinct-for-each-sequence
-
-# NOTE: dynamics_distn should probably be an instance of AutoRegression,
-# emission_distn should probably be an instance of Regression, and
+# NOTE: dynamics_distn should be an instance of Regression,
+# emission_distn should be an instance of Regression, and
 # init_dynamics_distn should probably be an instance of Gaussian
-
-######################
-#  algorithm mixins  #
-######################
 
 class _LDSBase(Model):
 
@@ -381,7 +375,7 @@ class NonstationaryLDS(
 class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
     _states_class = LDSStatesZeroInflatedCountData
 
-    def __init__(self, *args, rho=1.0, **kwargs):
+    def __init__(self, rho, *args, **kwargs):
         """
         :param rho: Probability of count drawn from model
                     With pr 1-rho, the emission is deterministically zero
@@ -401,7 +395,6 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
                 x=np.hstack((s.gaussian_states, inputs)), return_xy=False)
 
             # Zero out data
-            from scipy.sparse import csr_matrix
             zeros = np.random.rand(s.T, self.D_obs) > self.rho
             data[zeros] = 0
             s.data = csr_matrix(data)
@@ -509,25 +502,6 @@ class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
 ##############################
 
 # TODO make data-dependent default constructors
-
-from pybasicbayes.distributions import Regression
-
-
-def random_rotation(n, theta=None):
-    if theta is None:
-        # Sample a random, slow rotation
-        theta = 0.5 * np.pi * np.random.rand()
-
-    if n == 1:
-        return np.random.rand() * np.eye(1)
-
-    rot = np.array([[np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]])
-    out = np.zeros((n, n))
-    out[:2, :2] = rot
-    q = np.linalg.qr(np.random.randn(n, n))[0]
-    return q.dot(out).dot(q.T)
-
 def DefaultLDS(D_obs, D_latent, D_input=0,
                mu_init=None, sigma_init=None,
                A=None, B=None, sigma_states=None,
@@ -560,10 +534,6 @@ def DefaultLDS(D_obs, D_latent, D_input=0,
     set_default("sigma_obs", sigma_obs, 0.1 * np.eye(D_obs))
 
     return model
-
-
-from pybasicbayes.distributions import Gaussian
-from pylds.distributions import PoissonRegression
 
 def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
                       mu_init=None, sigma_init=None,

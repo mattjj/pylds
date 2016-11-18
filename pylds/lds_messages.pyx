@@ -13,7 +13,7 @@ from numpy.math cimport INFINITY, PI
 from scipy.linalg.cython_blas cimport dsymm, dcopy, dgemm, dgemv, daxpy, dsyrk, \
     dtrmv, dger, dnrm2, ddot
 from scipy.linalg.cython_lapack cimport dpotrf, dpotrs, dpotri, dtrtrs
-from util cimport copy_transpose, copy_upper_lower
+from cyutil cimport copy_transpose, copy_upper_lower
 
 # NOTE: because the matrix operations are done in Fortran order but the code
 # expects C ordered arrays as input, the BLAS and LAPACK function calls mark

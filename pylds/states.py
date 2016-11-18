@@ -468,8 +468,8 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         # h_node = y^T R^{-1} C - u^T D^T R^{-1} C
         h_node = (centered_data * J_obs).dot(C)
 
-        log_Z_node = -self.D_emission / 2. * np.log(2 * np.pi) * np.ones(self.T)
-        log_Z_node -= 1. / 2 * np.sum(np.log(sigmasq))
+        log_Z_node = -self.mask.sum(1) / 2. * np.log(2 * np.pi)
+        log_Z_node -= 1. / 2 * np.sum(self.mask * np.log(sigmasq), axis=1)
         log_Z_node -= 1. / 2 * np.sum(centered_data ** 2 * J_obs, axis=1)
 
         return J_node, h_node, log_Z_node
@@ -679,8 +679,11 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     def log_likelihood(self):
         if self.has_count_data:
-            return self.emission_distn.log_likelihood(
-                (np.hstack((self.gaussian_states, self.inputs)), self.data)).sum()
+            ll = self.emission_distn.log_likelihood(
+                (np.hstack((self.gaussian_states, self.inputs)), self.data),
+                mask=self.mask).sum()
+            return ll
+
         else:
             return super(_LDSStatesCountData, self).log_likelihood()
 
@@ -914,7 +917,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             y_t = np.zeros(N)
             ns_t = self.data.indices[self.data.indptr[t]:self.data.indptr[t+1]]
             y_t[ns_t] = self.data.data[self.data.indptr[t]:self.data.indptr[t+1]]
-            ll = self.emission_distn.log_likelihood((X[t], y_t))
+            ll = self.emission_distn._elementwise_log_likelihood((X[t], y_t))
             ll = ll.ravel()
 
             # Evaluate the probability that each emission was "exposed",
@@ -970,14 +973,12 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         return mean
 
 
-class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
+class _LaplaceApproxLDSStatesBase(_LDSStatesMaskedData, _LDSStates):
     def __init__(self, model, verbose=True, **kwargs):
 
-        super(LaplaceApproxPoissonLDSStates, self).__init__(model, **kwargs)
-        # self.stateseq = 1e-3 * np.random.randn(T, self.n)
+        super(_LaplaceApproxLDSStatesBase, self).__init__(model, **kwargs)
         self.stateseq_sigma = np.eye(self.D_latent)[None, :, :].repeat(self.T, axis=0)
         self.verbose = verbose
-        # self._L_prec = None
 
     @property
     def b(self):
@@ -989,10 +990,27 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
 
     def resample_gaussian_states(self):
         """
-        We haven't implemented exact sampling for Gaussian latents
-        given Poisson observations
+        Sample from the Laplace approximation.
         """
-        raise NotImplementedError
+        # TODO: This is pretty ugly... gaussian_states
+        # is the mean of the conditional density p(x|y), not the mean of the
+        # emission density p(y|x). We can approximately sample around the
+        # mean by zeroing out he h terms and only keeping the J terms.
+        # In that case, we're sampling from a zero-mean Gaussian with the
+        # same covariance structure as p(x|y)
+        self.gaussian_states = self.laplace_approximation()
+
+        # Hacky: zero out any input terms since they were already
+        # accounted for in the Laplace approximation
+        J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, log_Z_pair = \
+            self.info_dynamics_params
+
+        prms = self.info_init_params + \
+               (J_pair_11, J_pair_21, J_pair_22, np.zeros_like(h_pair_1),
+                np.zeros_like(h_pair_2), log_Z_pair,) + \
+               self.info_emission_params
+        self._normalizer, zs = info_sample(*prms)
+        self.gaussian_states += zs
 
     def log_likelihood(self):
         return self.mode_log_likelihood()
@@ -1042,46 +1060,6 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         else:
             return ell.sum()
 
-    def joint_probability(self, x):
-        # A differentiable function to compute the joint probability for a given
-        # latent state sequence
-        import autograd.numpy as anp
-        ll = 0
-
-        # Initial likelihood
-        mu_init, sigma_init = self.mu_init, self.sigma_init
-        ll += -0.5 * anp.dot(x[0] - mu_init, anp.linalg.solve(sigma_init, x[0] - mu_init))
-
-        # Transition likelihoods
-        A, B, Q = self.A, self.B, self.sigma_states
-        xpred = anp.dot(x[:-1], A.T)
-        # for t in xrange(self.T-1):
-        #     tll += gaussian_ll(x[t+1], xpred[t], B)
-        # Vectorize the transition likelihood calculations
-        dx = x[1:] - xpred
-        ll += -0.5 * (dx.T * anp.linalg.solve(Q, dx.T)).sum()
-
-        # Observation likelihoods
-        y, mask = self.data, self.mask
-        C, b = self.C, self.b
-        if mask is not None:
-            y = y[mask]
-            loglmbda = (anp.dot(x, C.T) + b.T)[mask]
-        else:
-            loglmbda = (anp.dot(x, C.T) + b.T)
-
-        lmbda = anp.exp(loglmbda)
-
-        ll += anp.sum(y * loglmbda)
-        ll -= anp.sum(lmbda)
-
-        if anp.isnan(ll):
-            ll = -anp.inf
-
-        # assert np.isfinite(ll)
-
-        return ll / self.T
-
     def E_step(self):
         self.gaussian_states = self.laplace_approximation()
 
@@ -1091,6 +1069,26 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         self._set_expected_stats(
             self.gaussian_states, self.smoothed_sigmas, E_xtp1_xtT)
 
+    def joint_probability(self, x):
+        """
+        Sub-classes must implement this function. It must use
+        autograd to compute the joint probability p(x,y|theta)
+        in an automatically differentiable way.
+
+        :param x: gaussian states
+        :return: joint probability log p(x, y)
+        """
+        raise NotImplementedError
+
+
+    @property
+    def info_emission_params(self):
+        """
+        Compute the "node potentials," i.e. the block diagonal terms
+        in the inverse hessian of joint probability.
+        :return: J_node, h_node, log_Z_node
+        """
+        raise NotImplementedError
 
     def laplace_approximation(self):
         from autograd import value_and_grad, hessian_vector_product
@@ -1128,45 +1126,6 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
         # Unflatten and compute the expected sufficient statistics
         mu = mu.reshape((T, n))
         return mu
-
-    @property
-    def info_emission_params(self):
-        # Replace the Gaussian potentials with the corresponding
-        # potentials from the Hessian of the Poisson negative log likelihood.
-        T, mu, n = self.T, self.gaussian_states, self.D_latent
-
-        # The Hessian of the negative log likelihood evaluated at mu is the
-        # precision of the Gaussian potential. The neg. log likelihood is
-        #   = -y * log(lambda) + lambda
-        #   = -y * (Cx + b) + exp(Cx + b)
-        # And its Hessian is
-        #   = CC^T exp(Cx + b) evaluated at x=mu
-        mask = self.mask
-        T, n, p = self.T, self.D_latent, self.D_emission
-        C, b = self.C, self.b
-        M = mask.sum(1) if mask is not None else p * np.ones(T)
-
-        # Precompute a few bits
-        Cout = np.array([np.outer(C[i], C[i]) for i in range(p)])
-        lmbda = np.exp(mu.dot(C.T) + b.T)
-
-        # Initialize params. Note: the linear term will be zero in this case.
-        J_node = np.zeros((T, n, n))
-        h_node = np.zeros((T, n))
-
-        log_Z_node = np.zeros(self.T)
-        for t in range(T):
-            if M[t] == 0:
-                continue
-
-            w = mask[t] * lmbda[t] if mask is not None else lmbda[t]
-            J_node[t] = (w[:, None, None] * Cout).sum(0)
-
-            # Compute the log normalizer
-            log_Z_node[t] = -M[t] / 2. * np.log(2 * np.pi)
-            log_Z_node[t] += 1. / 2 * np.linalg.slogdet(J_node[t])[1]
-
-        return J_node, h_node, log_Z_node
 
     def _set_expected_stats(self, mu, sigmas, E_xtp1_xtT):
         # Compute expectations!
@@ -1217,31 +1176,10 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
     # Sampling the Laplace approximation
     def info_filter_and_sample(self, mu, num_samples=1):
         from pylds.lds_messages_interface import info_sample
-        T, n, p = self.T, self.D_latent, self.D_emission
-        A, sigma_states = self.A, self.sigma_states
-
-        J_init = np.linalg.inv(self.sigma_init)
-        h_init = np.zeros((n,))
-
-        J_pair_11 = A.T.dot(np.linalg.solve(sigma_states, A))
-        J_pair_21 = -np.linalg.solve(sigma_states, A)
-        J_pair_22 = np.linalg.inv(sigma_states)
-
-        # Specify the h_pair potentials
-        h_pair_1 = np.zeros((T, n))
-        h_pair_2 = np.zeros((T, n))
-
-        # Replace the Gaussian potentials with the corresponding
-        # potentials from the Hessian of the Poisson negative log likelihood.
-        J_node, h_node = self.info_emission_params
-
-        samples = np.zeros((num_samples, T, n))
+        samples = np.zeros((num_samples, self.T, self.D_latent))
         for i in range(num_samples):
-            _, zs = \
-                info_sample(
-                    J_init, h_init, 0, J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, 0, J_node, h_node, 0)
+            _, zs = info_sample(*self.info_params)
             samples[i] = mu + zs
-
         return samples
 
     # Smoothing
@@ -1290,7 +1228,191 @@ class LaplaceApproxPoissonLDSStates(_LDSStatesMaskedData, _LDSStates):
             np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
 
         # Compute the expectations for the observations
-        EyxT = np.sum(self.data.X[:, :, None] * mu[:, None, :], axis=0)
-        Ey = np.sum(self.data.X, axis=0)
+        EyxT = np.sum(self.data[:, :, None] * mu[:, None, :], axis=0)
+        Ey = np.sum(self.data, axis=0)
 
         self.E_emission_stats = np.array([EyxT, Ey, mu, sig_t_t])
+
+
+class LaplaceApproxPoissonLDSStates(_LaplaceApproxLDSStatesBase):
+    """
+    Poisson observations
+    """
+    def joint_probability(self, x):
+        # A differentiable function to compute the joint probability for a given
+        # latent state sequence
+        import autograd.numpy as anp
+        T = self.T
+        ll = 0
+
+        # Initial likelihood
+        mu_init, sigma_init = self.mu_init, self.sigma_init
+        ll += -0.5 * anp.dot(x[0] - mu_init, anp.linalg.solve(sigma_init, x[0] - mu_init))
+
+        # Transition likelihoods
+        A, B, Q = self.A, self.B, self.sigma_states
+        xpred = anp.dot(x[:T-1], A.T) + anp.dot(self.inputs[:T-1], B.T)
+        # for t in xrange(self.T-1):
+        #     tll += gaussian_ll(x[t+1], xpred[t], B)
+        # Vectorize the transition likelihood calculations
+        dx = x[1:] - xpred
+        ll += -0.5 * (dx.T * anp.linalg.solve(Q, dx.T)).sum()
+
+        # Observation likelihoods
+        y, mask = self.data, self.mask
+        C, D, b = self.C, self.D, self.b
+        if mask is not None:
+            y = y[mask]
+            loglmbda = (anp.dot(x, C.T) + anp.dot(self.inputs, D.T) + b.T)[mask]
+        else:
+            loglmbda = (anp.dot(x, C.T) + anp.dot(self.inputs, D.T) + b.T)
+
+        lmbda = anp.exp(loglmbda)
+
+        ll += anp.sum(y * loglmbda)
+        ll -= anp.sum(lmbda)
+
+        if anp.isnan(ll):
+            ll = -anp.inf
+
+        # assert np.isfinite(ll)
+
+        return ll / T
+
+    def _local_emission_likelihood(self, t):
+        # TODO: Finish this up
+        raise NotImplementedError
+
+    @property
+    def info_emission_params(self):
+        # Replace the Gaussian potentials with the corresponding
+        # potentials from the Hessian of the Poisson negative log likelihood.
+        T, mu, n = self.T, self.gaussian_states, self.D_latent
+
+        # The Hessian of the negative log likelihood evaluated at mu is the
+        # precision of the Gaussian potential. The neg. log likelihood is
+        #   = -y * log(lambda) + lambda
+        #   = -y * (Cx + b) + exp(Cx + b)
+        # And its Hessian is
+        #   = CC^T exp(Cx + b) evaluated at x=mu
+        mask = self.mask
+        T, n, p = self.T, self.D_latent, self.D_emission
+        C, D, b = self.C, self.D, self.b
+        M = mask.sum(1) if mask is not None else p * np.ones(T)
+
+        # Precompute a few bits
+        Cout = np.array([np.outer(C[i], C[i]) for i in range(p)])
+        lmbda = np.exp(mu.dot(C.T) + self.inputs.dot(D.T) + b.T)
+
+        # Initialize params. Note: the linear term will be zero in this case.
+        J_node = np.zeros((T, n, n))
+        h_node = np.zeros((T, n))
+
+        log_Z_node = np.zeros(self.T)
+        for t in range(T):
+            if M[t] == 0:
+                continue
+
+            w = mask[t] * lmbda[t] if mask is not None else lmbda[t]
+            J_node[t] = (w[:, None, None] * Cout).sum(0)
+
+            # Compute the log normalizer
+            log_Z_node[t] = -M[t] / 2. * np.log(2 * np.pi)
+            log_Z_node[t] += 1. / 2 * np.linalg.slogdet(J_node[t])[1]
+
+        return J_node, h_node, log_Z_node
+
+
+
+class LaplaceApproxBernoulliLDSStates(_LaplaceApproxLDSStatesBase):
+    """
+    Bernoulli observations
+    """
+    def joint_probability(self, x):
+        # A differentiable function to compute the joint probability for a given
+        # latent state sequence
+        import autograd.numpy as anp
+        T = self.T
+        ll = 0
+
+        # Initial likelihood
+        mu_init, sigma_init = self.mu_init, self.sigma_init
+        ll += -0.5 * anp.dot(x[0] - mu_init, anp.linalg.solve(sigma_init, x[0] - mu_init))
+
+        # Transition likelihoods
+        A, B, Q = self.A, self.B, self.sigma_states
+        xpred = anp.dot(x[:T-1], A.T) + anp.dot(self.inputs[:T-1], B.T)
+        # for t in xrange(self.T-1):
+        #     tll += gaussian_ll(x[t+1], xpred[t], B)
+        # Vectorize the transition likelihood calculations
+        dx = x[1:] - xpred
+        ll += -0.5 * (dx.T * anp.linalg.solve(Q, dx.T)).sum()
+
+        # Observation likelihoods
+        y, mask = self.data, self.mask
+        C, D, b = self.C, self.D, self.b
+
+        def loglogistic(u):
+            return -anp.log(1+anp.exp(-1 * u))
+
+        def log1mlogistic(u):
+            return log1mlogistic(-1 * u)
+
+        psi = anp.dot(x, C.T) + anp.dot(self.inputs, D.T) + b.T
+        if mask is not None:
+            y = y[mask]
+            # loglmbda = (anp.dot(x, C.T) + anp.dot(self.inputs, D.T) + b.T)[mask]
+            loglmbda = loglogistic(psi)[mask]
+            log1mlmbda = log1mlogistic(psi)[mask]
+        else:
+            loglmbda = loglogistic(psi)
+            log1mlmbda = log1mlogistic(psi)
+
+        ll += anp.sum(y * loglmbda)
+        ll += anp.sum((1-y) * log1mlmbda)
+
+        if anp.isnan(ll):
+            ll = -anp.inf
+
+        assert np.isfinite(ll)
+
+        return ll / T
+
+    @property
+    def info_emission_params(self):
+        # Replace the Gaussian potentials with the corresponding
+        # potentials from the Hessian of the Poisson negative log likelihood.
+        T, mu, n = self.T, self.gaussian_states, self.D_latent
+
+        # The Hessian of the negative log likelihood evaluated at mu is the
+        # precision of the Gaussian potential. The neg. log likelihood is
+        #   = -y * log(sigma(Cx+Du+b))  - (1-y) * log(sigma(-Cx-Du-b))
+        # And its Hessian is
+        #   = CC^T exp(Cx + b) evaluated at x=mu
+        mask = self.mask
+        T, n, p = self.T, self.D_latent, self.D_emission
+        C, D, b = self.C, self.D, self.b
+        M = mask.sum(1) if mask is not None else p * np.ones(T)
+
+        # Precompute a few bits
+        Cout = np.array([np.outer(C[i], C[i]) for i in range(p)])
+        lmbda = np.exp(mu.dot(C.T) + self.inputs.dot(D.T) + b.T)
+
+        # Initialize params. Note: the linear term will be zero in this case.
+        J_node = np.zeros((T, n, n))
+        h_node = np.zeros((T, n))
+
+        log_Z_node = np.zeros(self.T)
+        for t in range(T):
+            if M[t] == 0:
+                continue
+
+            w = mask[t] * lmbda[t] if mask is not None else lmbda[t]
+            J_node[t] = (w[:, None, None] * Cout).sum(0)
+
+            # Compute the log normalizer
+            log_Z_node[t] = -M[t] / 2. * np.log(2 * np.pi)
+            log_Z_node[t] += 1. / 2 * np.linalg.slogdet(J_node[t])[1]
+
+        return J_node, h_node, log_Z_node
+
