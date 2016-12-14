@@ -15,7 +15,7 @@ pip install pylds
 ```
 
 # Example
-PyLDS exposes a variety of classes for working with linear
+PyLDS exposes a variety of classes and functions for working with linear
 dynamical systems. For example, the following snippet will
 generate synthetic data from a random model:
 ```python
@@ -88,7 +88,12 @@ plt.legend(loc="upper center", ncol=2)
 
 Check out the [examples](/examples) directory for demos of other
 types of inference, as well as examples of how to work with count
-data and missing observations. 
+data and missing observations.
+
+For a lower-level interface to the fast message passing functions,
+see [lds_messages.pyx](pylds/lds_messages.pyx),
+[lds_info_messages.pyx](pylds/lds_info_messages.pyx), and
+[lds_messages_interface.py](pylds/lds_messages_interface.py).
 
 # Installation
 To install `pylds` from source, first clone the repo
