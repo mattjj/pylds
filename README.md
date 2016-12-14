@@ -1,13 +1,14 @@
 # PyLDS: Bayesian inference for linear dynamical systems
 _Authors: Matt Johnson and Scott Linderman_
 
-This package supports Bayesian inference via Gibbs sampling,
+This package supports Bayesian learning and inference  via Gibbs sampling,
 structured mean field, and expectation maximization (EM) for
 dynamical systems with linear Gaussian state dynamics and
 either linear Gaussian or count observations. For count data,
 we support either Pólya-gamma augmentation or Laplace approximation.
-These inference algorithms all benefit from fast
-message passing code using Cython and BLAS.
+All inference algorithms all benefit from fast message passing code
+written in Cython with direct calls to the BLAS and LAPACK routines
+linked to the scipy build.
 
 ```
 pip install pylds
