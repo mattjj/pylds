@@ -6,7 +6,7 @@ structured mean field, and expectation maximization (EM) for
 dynamical systems with linear Gaussian state dynamics and
 either linear Gaussian or count observations. For count data,
 we support either Pólya-gamma augmentation or Laplace approximation.
-All inference algorithms all benefit from fast message passing code
+All inference algorithms benefit from fast message passing code
 written in Cython with direct calls to the BLAS and LAPACK routines
 linked to the scipy build.
 
