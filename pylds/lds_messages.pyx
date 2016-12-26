@@ -26,7 +26,6 @@ from cyutil cimport copy_transpose, copy_upper_lower
 # TODO try an Eigen version! faster for small matrices (numerically and in
 # function call overhead)
 # TODO cholesky update/downdate versions (square root filter)
-# TODO handle control inputs
 
 
 ##################################
@@ -114,7 +113,6 @@ def rts_smoother(
             temp_nn)
 
     # run rts update backwards, using predictions
-    # TODO: Doesn't this need B?
     for t in range(T-2,-1,-1):
         rts_backward_step(
             A[t], sigma_states[t],
@@ -347,7 +345,7 @@ def filter_and_sample_diagonal(
 def filter_and_sample_randomwalk(
     double[::1] mu_init, double[::1] sigmasq_init, double[:,:] sigmasq_states,
     double[:,:] sigmasq_obs, double[:,::1] data):
-    # TODO: Update!
+    # TODO: the randomwalk code needs to be updated to handle inputs
 
     # allocate temporaries and internals
     cdef int T = data.shape[0], n = data.shape[1]
@@ -631,7 +629,7 @@ cdef inline double condition_on_diagonal(
         dcopy(&p, &y[0], &inc, &temp_p[0], &inc)
         dgemv('T', &n, &p, &neg1, &C[0,0], &n, &mu_x[0], &inc, &one, &temp_p[0], &inc)
         if d > 0:
-            dgemv('T', &d, &p, &neg1, &D[0,0], &n, &u[0], &inc, &one, &temp_p[0], &inc)
+            dgemv('T', &d, &p, &neg1, &D[0,0], &d, &u[0], &inc, &one, &temp_p[0], &inc)
 
         # Compute conditional mean and variance using low rank plus diagonal code
         dgemm('T', 'N', &p, &n, &n, &one, &C[0,0], &n, &sigma_x[0,0], &n, &zero, &temp_pn[0,0], &p)
@@ -710,7 +708,7 @@ cdef inline double condition_on_randomwalk(
     double *mu_cond, double *sigmasq_cond,
     ) nogil:
 
-    # TODO: Update!
+    # TODO: the randomwalk code needs to be updated to handle inputs
 
     cdef double ll = -n/2. * log(2.*PI), sigmasq_yi
     cdef int i

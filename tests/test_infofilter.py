@@ -258,7 +258,6 @@ def check_info_Estep(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, i
     ll2, smoothed_mus2, smoothed_sigmas2, ExnxT2 = info_E_step(
         *info_params(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, data, inputs))
 
-    # TODO: Log likelihood calculations are broken!
     assert np.isclose(ll,ll2)
     assert np.allclose(smoothed_mus, smoothed_mus2)
     assert np.allclose(smoothed_sigmas, smoothed_sigmas2)

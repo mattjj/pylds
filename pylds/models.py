@@ -454,7 +454,9 @@ class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
 
     def M_step_init_dynamics_distn(self):
         pass
-        # TODO: This is a bug in PYLDS
+        # TODO: the states object does not have a E_x1_x1 term...
+        #       we could use the first of E_x_xT
+
         # self.init_dynamics_distn.max_likelihood(
         #     stats=(sum(s.E_x1_x1 for s in self.states_list)))
 

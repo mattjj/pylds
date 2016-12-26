@@ -276,7 +276,6 @@ class _LDSStates(object):
         return self.info_E_step()
 
     def std_E_step(self):
-        # TODO: Update normalizer?
         self._normalizer, self.smoothed_mus, self.smoothed_sigmas, \
         E_xtp1_xtT = E_step(
             self.mu_init, self.sigma_init,
@@ -866,6 +865,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             h_node[t] -= (om_t * inputs[t].dot(D[ns_t].T)).dot(C[ns_t])
 
         # TODO: See comment in _LDSStatesCountData for info on the log normalizers
+        # The same applies to this zero-inflated data
         log_Z_node = np.zeros(self.T)
 
         return J_node, h_node, log_Z_node

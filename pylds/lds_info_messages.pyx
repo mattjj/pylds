@@ -362,7 +362,6 @@ cdef inline void info_rts_backward_step(
     # Convert to distribution form
     info_to_distn(Jfilt_t, hfilt_t, mu_t, sigma_t)
 
-    # TODO: Check if this needs updating
     # Compute expected sufficient statistics
     dgemm('T', 'N', &n, &n, &n, &neg1, &J21[0,0], &n, &sigma_t[0,0], &n, &zero, &ExnxT[0,0], &n)
     dpotrs('L', &n, &n, &temp_nn[0,0], &n, &ExnxT[0,0], &n, &info)
