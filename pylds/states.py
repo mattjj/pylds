@@ -83,7 +83,6 @@ class _LDSStates(object):
 
     def sample_predictions(self, Tpred, inputs=None, states_noise=False, obs_noise=False):
         inputs = np.zeros((Tpred, self.D_input)) if inputs is None else inputs
-        # _, filtered_Js, filtered_hs = kalman_info_filter(*self.info_params)
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init,
             self.A, self.B, self.sigma_states,
