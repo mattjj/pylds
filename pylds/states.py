@@ -83,14 +83,13 @@ class _LDSStates(object):
 
     def sample_predictions(self, Tpred, inputs=None, states_noise=False, obs_noise=False):
         inputs = np.zeros((Tpred, self.D_input)) if inputs is None else inputs
-        # _, filtered_Js, filtered_hs = kalman_info_filter(*self.info_params)
         _, filtered_mus, filtered_sigmas = kalman_filter(
             self.mu_init, self.sigma_init,
             self.A, self.B, self.sigma_states,
             self.C, self.D, self.sigma_obs,
             self.inputs, self.data)
 
-        init_mu = self.A.dot(filtered_mus[-1]) + self.B.dot(inputs[-1])
+        init_mu = self.A.dot(filtered_mus[-1]) + self.B.dot(self.inputs[-1])
         init_sigma = self.sigma_states + self.A.dot(
             filtered_sigmas[-1]).dot(self.A.T)
 
@@ -100,7 +99,11 @@ class _LDSStates(object):
             randseq += np.random.randn(Tpred - 1, self.D_latent).dot(L.T)
 
         states = np.empty((Tpred, self.D_latent))
-        states[0] = np.random.multivariate_normal(init_mu, init_sigma)
+        if states_noise:
+            states[0] = np.random.multivariate_normal(init_mu, init_sigma)
+        else:
+            states[0] = init_mu
+            
         for t in range(1, Tpred):
             states[t] = self.A.dot(states[t - 1]) + \
                         self.B.dot(inputs[t - 1]) + \
