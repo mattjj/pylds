@@ -1,4 +1,5 @@
 recursive-include pylds *.pyx
 recursive-include pylds *.pxd
 recursive-include pylds *.cpp
+recursive-include pylds *.c
 recursive-include pylds *.h
