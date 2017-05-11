@@ -56,7 +56,7 @@ if use_cython:
 
 setup(
     name='pylds',
-    version='0.0.3',
+    version='0.0.4',
     description="Learning and inference for linear dynamical systems"
     "with fast Cython and BLAS/LAPACK implementations",
     author='Matthew James Johnson and Scott W Linderman',
