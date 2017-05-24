@@ -7,9 +7,6 @@ from scipy.sparse import csr_matrix
 from pybasicbayes.util.general import objarray
 from pylds.lds_messages_interface import info_E_step, info_sample, kalman_info_filter, kalman_filter, E_step
 
-import pypolyagamma as ppg
-from pypolyagamma.distributions import _PGLogisticRegressionBase
-
 # TODO on instantiating, maybe gaussian states should be resampled
 # TODO make niter an __init__ arg instead of a method arg
 
@@ -603,10 +600,12 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             __init__(model, data=data, mask=mask, **kwargs)
 
         # Check if the emission matrix is a count regression
+        from pypolyagamma.distributions import _PGLogisticRegressionBase
         if isinstance(self.emission_distn, _PGLogisticRegressionBase):
             self.has_count_data = True
 
             # Initialize the Polya-gamma samplers
+            import pypolyagamma as ppg
             num_threads = ppg.get_omp_num_threads()
             seeds = np.random.randint(2 ** 16, size=num_threads)
             self.ppgs = [ppg.PyPolyaGamma(seed) for seed in seeds]
@@ -700,6 +699,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         psi = self.gaussian_states.dot(C.T) + self.inputs.dot(D.T) + ed.b.T
 
         b = ed.b_func(self.data)
+        import pypolyagamma as ppg
         ppg.pgdrawvpar(self.ppgs, b.ravel(), psi.ravel(), self.omega.ravel())
 
     def smooth(self):

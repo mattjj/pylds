@@ -1,4 +1,4 @@
-# PyLDS: Bayesian inference for linear dynamical systems
+# PyLDS: Bayesian inference for linear dynamical systems [![Test status](https://travis-ci.org/mattjj/pylds.svg?branch=master)](https://travis-ci.org/mattjj/pylds)
 _Authors: Matt Johnson and Scott Linderman_
 
 This package supports Bayesian learning and inference  via Gibbs sampling,
