@@ -4,6 +4,7 @@ from setuptools.command.sdist import sdist as _sdist
 from distutils.errors import CompileError
 from warnings import warn
 import os.path
+import sys
 from glob import glob
 
 try:
@@ -27,6 +28,7 @@ class build_ext(_build_ext):
             _build_ext.run(self)
         except CompileError:
             warn('Failed to build extension modules')
+            sys.exit(1)
 
 class sdist(_sdist):
     def run(self):
@@ -35,6 +37,7 @@ class sdist(_sdist):
             cythonize(os.path.join('pylds','**','*.pyx'))
         except:
             warn('Failed to generate extension files from Cython sources')
+            sys.exit(1)
         finally:
             _sdist.run(self)
 
@@ -65,12 +68,9 @@ setup(
     url='https://github.com/mattjj/pylds',
     packages=['pylds'],
     install_requires=[
-        'numpy>=1.9.3',
-        'scipy>=0.16',
-        'matplotlib',
-        'pybasicbayes',
-        'pypolyagamma>=1.1',
-        'autograd'],
+        'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib',
+        'pybasicbayes', 'pypolyagamma>=1.1', 'autograd'],
+    setup_requres=['future'],
     ext_modules=ext_modules,
     classifiers=[
         'Intended Audience :: Science/Research',

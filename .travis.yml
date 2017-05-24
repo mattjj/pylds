@@ -2,15 +2,28 @@ sudo: false
 language: python
 python:
     - "2.7"
+    - "3.5"
+    - "3.6"
 notifications:
     email: false
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - gcc-4.9
+      - g++-4.9
 before_install:
-  - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
+    else
+      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+    fi
   - bash miniconda.sh -b -p $HOME/miniconda
   - export PATH="$HOME/miniconda/bin:$PATH"
   - conda update --yes conda
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip numpy scipy matplotlib cython nose
-  - pip install pybasicbayes autoregressive
+  - conda config --add channels conda-forge
 install:
-  - python setup.py build_ext --inplace
+  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip numpy scipy matplotlib cython nose future
+  - pip install -v .
 script: nosetests tests
