@@ -37,16 +37,19 @@ def generate_data(sigmasq_states, sigmasq_obs, mu_init, sigmasq_init, T):
 
 def dense_sample_states(sigmasq_states, sigmasq_obs, mu_init, sigmasq_init, data):
     T, n = data.shape
+    inputs = np.zeros((T,0))
 
     # construct corresponding dense model
     A = np.eye(n)
+    B = np.zeros((n,0))
     sigma_states = np.diag(sigmasq_states)
     C = np.eye(n)
+    D = np.zeros((n,0))
     sigma_obs = np.diag(sigmasq_obs)
     sigma_init = np.diag(sigmasq_init)
 
     return filter_and_sample(
-        mu_init, sigma_init, A, sigma_states, C, sigma_obs, data)
+        mu_init, sigma_init, A, B, sigma_states, C, D, sigma_obs, inputs, data)
 
 
 #####################
