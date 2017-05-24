@@ -22,14 +22,6 @@ class build_ext(_build_ext):
         import numpy as np
         self.include_dirs.append(np.get_include())
 
-    # if extension modules fail to build, keep going anyway
-    def run(self):
-        try:
-            _build_ext.run(self)
-        except CompileError:
-            warn('Failed to build extension modules')
-            sys.exit(1)
-
 class sdist(_sdist):
     def run(self):
         try:
@@ -45,9 +37,7 @@ extension_pathspec = os.path.join('pylds','**','*.pyx')
 paths = [os.path.splitext(fp)[0] for fp in glob(extension_pathspec)]
 names = ['.'.join(os.path.split(p)) for p in paths]
 ext_modules = [
-    Extension(
-        name, sources=[path + '.cpp'], include_dirs=[os.path.join('deps')],
-        extra_compile_args=['-O3','-std=c++11','-w'])
+    Extension(name, sources=[path + '.c'], include_dirs=[os.path.join('deps')])
     for name, path in zip(names,paths)]
 
 if use_cython:
@@ -70,12 +60,11 @@ setup(
     install_requires=[
         'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib',
         'pybasicbayes', 'pypolyagamma>=1.1', 'autograd'],
-    setup_requres=['future'],
+    setup_requires=['future'],
     ext_modules=ext_modules,
     classifiers=[
         'Intended Audience :: Science/Research',
         'Programming Language :: Python',
-        'Programming Language :: C++',
     ],
     keywords=[
         'lds', 'linear dynamical system', 'kalman filter', 'kalman',
