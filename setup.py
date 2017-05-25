@@ -61,7 +61,7 @@ setup(
     packages=['pylds'],
     install_requires=[
         'numpy>=1.9.3', 'scipy>=0.16', 'matplotlib',
-        'pybasicbayes', 'autograd', 'pypolyagamma>=1.1'],
+        'pybasicbayes', 'autograd'],
     setup_requires=['future'],
     ext_modules=ext_modules,
     classifiers=[
