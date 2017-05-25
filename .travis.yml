@@ -18,6 +18,5 @@ before_install:
   - conda config --add channels conda-forge
 install:
   - conda install --yes python=$TRAVIS_PYTHON_VERSION pip numpy scipy matplotlib cython nose future
-  - python setup.py build_ext --inplace
-  # - pip install -v .
+  - pip install -v .
 script: nosetests tests

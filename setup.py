@@ -7,13 +7,6 @@ import os.path
 import sys
 from glob import glob
 
-try:
-    from Cython.Distutils import build_ext as _build_ext
-except ImportError:
-    use_cython = False
-else:
-    use_cython = True
-
 class build_ext(_build_ext):
     # see http://stackoverflow.com/q/19919905 for explanation
     def finalize_options(self):
@@ -33,19 +26,20 @@ class sdist(_sdist):
         finally:
             _sdist.run(self)
 
-extension_pathspec = os.path.join('pylds','**','*.pyx')
+extension_pathspec = os.path.join('pylds','*.pyx')
 paths = [os.path.splitext(fp)[0] for fp in glob(extension_pathspec)]
 names = ['.'.join(os.path.split(p)) for p in paths]
 ext_modules = [
     Extension(name, sources=[path + '.c'], include_dirs=[os.path.join('deps')])
     for name, path in zip(names,paths)]
 
-if use_cython:
+if os.environ.get('USE_CYTHON'):
     from Cython.Build import cythonize
     try:
         ext_modules = cythonize(extension_pathspec)
     except:
-        warn('Failed to generate extension module code from Cython files')
+        warn('Failed to generate extension files from Cython sources')
+        sys.exit(1)
 
 setup(
     name='pylds',
