@@ -7,6 +7,34 @@ import os.path
 import sys
 from glob import glob
 
+# generate list of .c extension modules based on the .pyx files
+extension_pathspec = os.path.join('pylds','*.pyx')  # only searches pylds/*.pyx!
+paths = [os.path.splitext(fp)[0] for fp in glob(extension_pathspec)]
+names = ['.'.join(os.path.split(p)) for p in paths]
+ext_modules = [
+    Extension(name, sources=[path + '.c'], include_dirs=[os.path.join('deps')])
+    for name, path in zip(names,paths)]
+
+# alternatively, use cython to generate extension modules if we can import it
+try:
+    from Cython.Distutils import build_ext as _build_ext
+except ImportError:
+    pass
+else:
+    from Cython.Build import cythonize
+    try:
+        ext_modules = cythonize('**/*.pyx')  # recursive globbing!
+    except:
+        warn('Failed to generate extension module code from Cython files')
+
+# if we run the dist command, regenerate the sources from cython
+class sdist(_sdist):
+    def run(self):
+        from Cython.Build import cythonize
+        cythonize(os.path.join('pylds','*.pyx'))
+        _sdist.run(self)
+
+# the final extension module build step should have numpy headers available
 class build_ext(_build_ext):
     # see http://stackoverflow.com/q/19919905 for explanation
     def finalize_options(self):
@@ -15,35 +43,9 @@ class build_ext(_build_ext):
         import numpy as np
         self.include_dirs.append(np.get_include())
 
-class sdist(_sdist):
-    def run(self):
-        try:
-            from Cython.Build import cythonize
-            cythonize(os.path.join('pylds','**','*.pyx'))
-        except:
-            warn('Failed to generate extension files from Cython sources')
-            sys.exit(1)
-        finally:
-            _sdist.run(self)
-
-extension_pathspec = os.path.join('pylds','*.pyx')
-paths = [os.path.splitext(fp)[0] for fp in glob(extension_pathspec)]
-names = ['.'.join(os.path.split(p)) for p in paths]
-ext_modules = [
-    Extension(name, sources=[path + '.c'], include_dirs=[os.path.join('deps')])
-    for name, path in zip(names,paths)]
-
-if os.environ.get('USE_CYTHON'):
-    from Cython.Build import cythonize
-    try:
-        ext_modules = cythonize(extension_pathspec)
-    except:
-        warn('Failed to generate extension files from Cython sources')
-        sys.exit(1)
-
 setup(
     name='pylds',
-    version='0.0.4',
+    version='0.0.5',
     description="Learning and inference for linear dynamical systems"
     "with fast Cython and BLAS/LAPACK implementations",
     author='Matthew James Johnson and Scott W Linderman',
