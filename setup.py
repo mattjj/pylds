@@ -7,7 +7,8 @@ import os
 import sys
 from glob import glob
 
-# generate list of .c extension modules based on the .pyx files
+# generate list of .c extension modules based on the .pyx files, which are
+# included in the pypi package (but aren't included in the git repo)
 extension_pathspec = os.path.join('pylds','*.pyx')  # only searches pylds/*.pyx!
 paths = [os.path.splitext(fp)[0] for fp in glob(extension_pathspec)]
 names = ['.'.join(os.path.split(p)) for p in paths]
@@ -16,6 +17,7 @@ ext_modules = [
     for name, path in zip(names,paths)]
 
 # alternatively, use cython to generate extension modules if we can import it
+# (which is required if we're installing from the git repo)
 try:
     from Cython.Distutils import build_ext as _build_ext
 except ImportError:
@@ -23,12 +25,13 @@ except ImportError:
 else:
     use_cython = True
 
-if use_cython and not os.environ.get('NO_USE_CYTHON'):
+if use_cython:
     from Cython.Build import cythonize
     try:
         ext_modules = cythonize('**/*.pyx')  # recursive globbing!
     except:
         warn('Failed to generate extension module code from Cython files')
+        sys.exit(1)
 
 # if we run the dist command, regenerate the sources from cython
 class sdist(_sdist):
