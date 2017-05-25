@@ -3,7 +3,7 @@ from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.sdist import sdist as _sdist
 from distutils.errors import CompileError
 from warnings import warn
-import os.path
+import os
 import sys
 from glob import glob
 
@@ -19,8 +19,11 @@ ext_modules = [
 try:
     from Cython.Distutils import build_ext as _build_ext
 except ImportError:
-    pass
+    use_cython = False
 else:
+    use_cython = True
+
+if use_cython and not os.environ.get('NO_USE_CYTHON'):
     from Cython.Build import cythonize
     try:
         ext_modules = cythonize('**/*.pyx')  # recursive globbing!
