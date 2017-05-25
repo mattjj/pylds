@@ -10,8 +10,29 @@ All inference algorithms benefit from fast message passing code
 written in Cython with direct calls to the BLAS and LAPACK routines
 linked to the scipy build.
 
+# Installation
+
+To install from pypi, just run
+
 ```
 pip install pylds
+```
+
+To install from a clone of the git repository, you need to install Cython.
+Here's one way to do it:
+
+```
+pip install cython
+git clone https://github.com/mattjj/pylds.git
+pip install -e pylds
+```
+
+To handle count data, you'll also need
+[pypolyagamma](https://github.com/slinderman/pypolyagamma), which can be
+installed with
+
+```
+pip install pypolyagamma>=1.1
 ```
 
 # Example
