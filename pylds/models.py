@@ -1,6 +1,6 @@
 from __future__ import division
+import copy
 import numpy as np
-from scipy.sparse import csr_matrix
 
 from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField, ModelMeanFieldSVI
@@ -40,8 +40,9 @@ class _LDSBase(Model):
         else:
             return sum(s.log_likelihood() for s in self.states_list)
 
-    def generate(self, T, keep=True, inputs=None):
-        s = self._states_class(model=self, T=T, inputs=inputs, initialize_from_prior=True)
+    def generate(self, T, keep=True, inputs=None, **kwargs):
+        s = self._states_class(model=self, T=T, inputs=inputs,
+                               initialize_from_prior=True, **kwargs)
         data = self._generate_obs(s, inputs)
         if keep:
             self.states_list.append(s)
@@ -180,6 +181,12 @@ class _LDSBase(Model):
 
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
+    def copy_sample(self):
+        model = copy.deepcopy(self)
+        for states in model.states_list:
+            states.data = None
+        return model
+
     def resample_model(self):
         self.resample_parameters()
         self.resample_states()
@@ -361,6 +368,13 @@ class NonstationaryLDS(
 class MissingDataLDS(_LDSGibbsSampling, _LDSBase):
     _states_class = LDSStatesMissingData
 
+    def copy_sample(self):
+        model = copy.deepcopy(self)
+        for states in model.states_list:
+            states.data = None
+            states.mask = None
+        return model
+
     def resample_emission_distn(self):
         xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
         mask = [s.mask for s in self.states_list]
@@ -370,6 +384,13 @@ class MissingDataLDS(_LDSGibbsSampling, _LDSBase):
 class CountLDS(_LDSGibbsSampling, _LDSBase):
     _states_class = LDSStatesCountData
 
+    def copy_sample(self):
+        model = copy.deepcopy(self)
+        for states in model.states_list:
+            states.data = None
+            states.mask = None
+            states.omega = None
+        return model
 
     def resample_emission_distn(self):
         xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
@@ -403,6 +424,8 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
             # Zero out data
             zeros = np.random.rand(s.T, self.D_obs) > self.rho
             data[zeros] = 0
+
+            from scipy.sparse import csr_matrix
             s.data = csr_matrix(data)
 
         else:
