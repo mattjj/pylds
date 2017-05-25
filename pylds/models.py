@@ -7,7 +7,8 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 
 from pybasicbayes.distributions import DiagonalRegression, Gaussian, Regression
 from pylds.distributions import PoissonRegression
-from pylds.states import LDSStates, LDSStatesZeroInflatedCountData, LaplaceApproxPoissonLDSStates
+from pylds.states import LDSStates, LDSStatesCountData, LDSStatesMissingData,\
+    LDSStatesZeroInflatedCountData, LaplaceApproxPoissonLDSStates
 from pylds.util import random_rotation
 
 # NOTE: dynamics_distn should be an instance of Regression,
@@ -23,23 +24,23 @@ class _LDSBase(Model):
         self.emission_distn = emission_distn
         self.states_list = []
 
-    def add_data(self,data, inputs=None, mask=None, **kwargs):
+    def add_data(self,data, inputs=None, **kwargs):
         assert isinstance(data,np.ndarray)
-        self.states_list.append(self._states_class(model=self, data=data, inputs=inputs, mask=mask, **kwargs))
+        self.states_list.append(self._states_class(model=self, data=data, inputs=inputs, **kwargs))
         return self
 
-    def log_likelihood(self, data=None, inputs=None, mask=None):
+    def log_likelihood(self, data=None, inputs=None, **kwargs):
         if data is not None:
             assert isinstance(data,(list,np.ndarray))
             if isinstance(data,np.ndarray):
-                self.add_data(data=data, inputs=inputs, mask=mask)
+                self.add_data(data=data, inputs=inputs, **kwargs)
                 return self.states_list.pop().log_likelihood()
             else:
                 return sum(self.log_likelihood(d, i) for (d, i) in zip(data, inputs))
         else:
             return sum(s.log_likelihood() for s in self.states_list)
 
-    def generate(self, T, inputs=None, keep=True):
+    def generate(self, T, keep=True, inputs=None):
         s = self._states_class(model=self, T=T, inputs=inputs, initialize_from_prior=True)
         data = self._generate_obs(s, inputs)
         if keep:
@@ -56,8 +57,8 @@ class _LDSBase(Model):
             raise NotImplementedError
         return s.data
 
-    def smooth(self, data, inputs=None, mask=None):
-        self.add_data(data, inputs=inputs, mask=mask)
+    def smooth(self, data, inputs=None, **kwargs):
+        self.add_data(data, inputs=inputs, **kwargs)
         s = self.states_list.pop()
         return s.smooth()
 
@@ -65,8 +66,8 @@ class _LDSBase(Model):
         # return means and covariances
         raise NotImplementedError
 
-    def sample_predictions(self, data, Tpred, inputs_pred=None, inputs=None, mask=None, states_noise=True, obs_noise=True):
-        self.add_data(data, inputs=inputs, mask=mask)
+    def sample_predictions(self, data, Tpred, inputs_pred=None, inputs=None, states_noise=True, obs_noise=True, **kwargs):
+        self.add_data(data, inputs=inputs, **kwargs)
         s = self.states_list.pop()
         return s.sample_predictions(Tpred, inputs=inputs_pred, states_noise=states_noise, obs_noise=obs_noise)
 
@@ -177,14 +178,6 @@ class _LDSBase(Model):
     def is_stable(self):
         return np.max(np.abs(np.linalg.eigvals(self.dynamics_distn.A))) < 1.
 
-    @property
-    def has_missing_data(self):
-        return any([s.mask is not None for s in self.states_list])
-
-    @property
-    def has_count_data(self):
-        return any([hasattr(s, "omega") and s.omega is not None for s in self.states_list])
-
 
 class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
     def resample_model(self):
@@ -206,15 +199,7 @@ class _LDSGibbsSampling(_LDSBase, ModelGibbsSampling):
 
     def resample_emission_distn(self):
         xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
-        mask = [s.mask for s in self.states_list] if self.has_missing_data else None
-        omega = [s.omega for s in self.states_list] if self.has_count_data else None
-
-        if self.has_count_data:
-            self.emission_distn.resample(data=xys, mask=mask, omega=omega)
-        elif self.has_missing_data:
-            self.emission_distn.resample(data=xys, mask=mask)
-        else:
-            self.emission_distn.resample(data=xys)
+        self.emission_distn.resample(data=xys)
 
 class _LDSMeanField(_LDSBase, ModelMeanField):
     def meanfield_coordinate_descent_step(self):
@@ -372,6 +357,27 @@ class NonstationaryLDS(
     def sigma_init(self, sigma_init):
         self.init_dynamics_distn.sigma = sigma_init
 
+
+class MissingDataLDS(_LDSGibbsSampling, _LDSBase):
+    _states_class = LDSStatesMissingData
+
+    def resample_emission_distn(self):
+        xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
+        mask = [s.mask for s in self.states_list]
+        self.emission_distn.resample(data=xys, mask=mask)
+
+
+class CountLDS(_LDSGibbsSampling, _LDSBase):
+    _states_class = LDSStatesCountData
+
+
+    def resample_emission_distn(self):
+        xys = [(np.hstack((s.gaussian_states, s.inputs)), s.data) for s in self.states_list]
+        mask = [s.mask for s in self.states_list]
+        omega = [s.omega for s in self.states_list]
+        self.emission_distn.resample(data=xys, mask=mask, omega=omega)
+
+
 class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
     _states_class = LDSStatesZeroInflatedCountData
 
@@ -467,37 +473,6 @@ class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
     def expected_log_likelihood(self):
         return sum([s.expected_log_likelihood() for s in self.states_list])
 
-    # def initialize_with_pca(self, init_model=None, N_iter=100):
-    #     from pglds.models import ApproxPoissonPCA
-    #     from pybasicbayes.util.text import progprint_xrange
-    #
-    #     ### Initialize with PCA
-    #     if init_model is None:
-    #         init_model = ApproxPoissonPCA(self.N, self.D_latent)
-    #
-    #         for states in self.states_list:
-    #             init_model.add_data(states.data.X, states.data.mask)
-    #
-    #         print("Initializing with PCA")
-    #         [init_model.resample_model() for _ in progprint_xrange(N_iter)]
-    #
-    #     C0 = init_model.C
-    #     b0 = init_model.emission_distn.b
-    #
-    #     self.init_dynamics_distn.mu = np.zeros(self.D_latent)
-    #     self.init_dynamics_distn.sigma = np.eye(self.D_latent)
-    #     self.emission_distn.C = C0.copy()
-    #     self.emission_distn.b = b0.copy()
-    #
-    #     for states, pca_states in zip(self.states_list, init_model.states_list):
-    #         states.stateseq = pca_states.gaussian_states.copy()
-    #
-    #     if hasattr(init_model, 'A'):
-    #         self.dynamics_distn.A = init_model.A.copy()
-    #         self.dynamics_distn.sigma = init_model.sigma_states.copy()
-    #
-    #         # self.resample_dynamics_distns()
-
 
 ##############################
 #  convenience constructors  #
@@ -536,6 +511,7 @@ def DefaultLDS(D_obs, D_latent, D_input=0,
     set_default("sigma_obs", sigma_obs, 0.1 * np.eye(D_obs))
 
     return model
+
 
 def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
                       mu_init=None, sigma_init=None,

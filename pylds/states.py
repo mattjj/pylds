@@ -424,8 +424,17 @@ class _LDSStatesMeanField(_LDSStates):
             _,_,E_C,_ = ed._natural_to_standard(ed.mf_natural_hypparam)
         return np.hstack((self.smoothed_mus, self.inputs)).dot(E_C.T)
 
+####################
+#  states classes  #
+####################
 
-class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
+class LDSStates(
+    _LDSStatesGibbs,
+    _LDSStatesMeanField):
+    pass
+
+
+class LDSStatesMissingData(_LDSStatesGibbs, _LDSStatesMeanField):
     def __init__(self, model, data=None, mask=None, **kwargs):
         if mask is not None:
             assert mask.shape == data.shape
@@ -439,12 +448,12 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         else:
             self.mask = None
 
-        super(_LDSStatesMaskedData, self).__init__(model, data=data, **kwargs)
+        super(LDSStatesMissingData, self).__init__(model, data=data, **kwargs)
 
     @property
     def info_emission_params(self):
         if self.mask is None:
-            return super(_LDSStatesMaskedData, self).info_emission_params
+            return super(LDSStatesMissingData, self).info_emission_params
 
         if self.diagonal_noise:
             return self._info_emission_params_diag
@@ -512,7 +521,7 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
     def expected_info_emission_params(self):
         n = self.D_latent
         if self.mask is None:
-            return super(_LDSStatesMaskedData, self).expected_info_emission_params
+            return super(LDSStatesMissingData, self).expected_info_emission_params
 
         raise Exception("Mean field for masked data is not implemented correctly. We need to handle "
                         "inputs properly, and we need to ravel E_CCT to make the dot product work.")
@@ -547,7 +556,7 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
 
     def _set_expected_stats(self, smoothed_mus, smoothed_sigmas, E_xtp1_xtT):
         if self.mask is None:
-            return super(_LDSStatesMaskedData, self).\
+            return super(LDSStatesMissingData, self).\
                 _set_expected_stats(smoothed_mus, smoothed_sigmas, E_xtp1_xtT)
 
         # Get the emission stats
@@ -594,9 +603,9 @@ class _LDSStatesMaskedData(_LDSStatesGibbs, _LDSStatesMeanField):
         self.E_emission_stats = objarray([E_ysq, E_yxuT, E_xuxuT, Tp])
 
 
-class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
+class LDSStatesCountData(LDSStatesMissingData, _LDSStatesGibbs):
     def __init__(self, model, data=None, mask=None, **kwargs):
-        super(_LDSStatesCountData, self). \
+        super(LDSStatesCountData, self). \
             __init__(model, data=data, mask=mask, **kwargs)
 
         # Check if the emission matrix is a count regression
@@ -619,12 +628,12 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
     def sigma_obs(self):
         if self.has_count_data:
             raise Exception("Count data does not have sigma_obs")
-        return super(_LDSStatesCountData, self).sigma_obs
+        return super(LDSStatesCountData, self).sigma_obs
 
     @property
     def info_emission_params(self):
         if not self.has_count_data:
-            return super(_LDSStatesCountData, self).info_emission_params
+            return super(LDSStatesCountData, self).info_emission_params
 
         # Otherwise, use the Polya-gamma augmentation
         # log p(y_{tn} | x, om)
@@ -676,7 +685,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         if self.has_count_data:
             raise NotImplementedError("Mean field with count observations is not yet supported")
 
-        return super(_LDSStatesCountData, self).expected_info_emission_params
+        return super(LDSStatesCountData, self).expected_info_emission_params
 
     def log_likelihood(self):
         if self.has_count_data:
@@ -686,7 +695,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
             return ll
 
         else:
-            return super(_LDSStatesCountData, self).log_likelihood()
+            return super(LDSStatesCountData, self).log_likelihood()
 
     def resample(self, niter=1):
         self.resample_gaussian_states()
@@ -704,7 +713,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
 
     def smooth(self):
         if not self.has_count_data:
-            return super(_LDSStatesCountData, self).smooth()
+            return super(LDSStatesCountData, self).smooth()
 
         X = np.column_stack((self.gaussian_states, self.inputs))
         mean = self.emission_distn.mean(X)
@@ -712,20 +721,7 @@ class _LDSStatesCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         return mean
 
 
-####################
-#  states classes  #
-####################
-
-class LDSStates(
-    _LDSStatesCountData,
-    _LDSStatesMaskedData,
-    _LDSStatesGibbs,
-    _LDSStatesMeanField):
-    pass
-
-
-
-class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
+class LDSStatesZeroInflatedCountData(LDSStatesMissingData, _LDSStatesGibbs):
     """
     In many cases, the observation dimension is so large and so sparse
     that a Bernoulli, Poisson, etc. is not a good model. Moreover, it
@@ -976,7 +972,7 @@ class LDSStatesZeroInflatedCountData(_LDSStatesMaskedData, _LDSStatesGibbs):
         return mean
 
 
-class _LaplaceApproxLDSStatesBase(_LDSStatesMaskedData, _LDSStates):
+class _LaplaceApproxLDSStatesBase(LDSStatesMissingData, _LDSStates):
     def __init__(self, model, verbose=True, **kwargs):
 
         super(_LaplaceApproxLDSStatesBase, self).__init__(model, **kwargs)
@@ -1031,26 +1027,6 @@ class _LaplaceApproxLDSStatesBase(_LDSStatesMaskedData, _LDSStates):
             return ll[1-self.mask].sum()
         else:
             return 0
-
-    # def _monte_carlo_log_likelihood(self, N_samples=100):
-    #     from scipy.misc import logsumexp
-    #     zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
-    #     lls = np.zeros(N_samples)
-    #     for i, z in enumerate(zs):
-    #         psi = z.dot(self.C.T) + self.b.T
-    #         lls[i] = self.data.log_likelihood_given_activation(psi).sum()
-    #
-    #     return -np.log(N_samples) + logsumexp(lls)
-    #
-    # def _monte_carlo_heldout_log_likelihood(self, N_samples=100):
-    #     from scipy.misc import logsumexp
-    #     zs = self.info_filter_and_sample(self.gaussian_states, num_samples=N_samples)
-    #     lls = np.zeros(N_samples)
-    #     for i, z in enumerate(zs):
-    #         psi = z.dot(self.C.T) + self.b.T
-    #         lls[i] = self.data.hll_given_activation(psi).sum()
-    #
-    #     return -np.log(N_samples) + logsumexp(lls)
 
     def expected_log_likelihood(self):
         ell = self.emission_distn.\
@@ -1109,10 +1085,6 @@ class _LaplaceApproxLDSStatesBase(_LDSStatesMaskedData, _LDSStates):
         def cbk(x):
             print("Iteration: ", itr[0], "\tObjective: ", obj(x).round(2))
             itr[0] += 1
-
-        # res = minimize(value_and_grad(obj), x0, tol=0.01,
-        #                jac=True,
-        #                callback=cbk if verbose else None)
 
         # Second order method -- should implement fast HVP
         res = minimize(value_and_grad(obj), x0,

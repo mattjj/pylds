@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from pybasicbayes.distributions import Regression, DiagonalRegression
 from pybasicbayes.util.text import progprint_xrange
 
-from pylds.models import DefaultLDS, LDS
+from pylds.models import DefaultLDS, MissingDataLDS
 
 npr.seed(0)
 
@@ -30,7 +30,7 @@ for i,offset in enumerate(range(0,T,chunksz)):
         mask[offset:min(offset+chunksz, T), :] = False
 
 # Fit with another LDS
-model = LDS(
+model = MissingDataLDS(
     dynamics_distn=Regression(
             nu_0=D_latent+3,
             S_0=D_latent*np.eye(D_latent),
@@ -93,7 +93,10 @@ lls = [gibbs_update(model) for _ in progprint_xrange(N_samples)]
 # Plot the log likelihood
 plt.figure()
 plt.plot(lls,'-b')
-plt.plot([0,N_samples], truemodel.log_likelihood(data, mask=mask) * np.ones(2), '-k')
+dummymodel = MissingDataLDS(
+    dynamics_distn=truemodel.dynamics_distn,
+    emission_distn=truemodel.emission_distn)
+plt.plot([0,N_samples], dummymodel.log_likelihood(data, mask=mask) * np.ones(2), '-k')
 plt.xlabel('iteration')
 plt.ylabel('log likelihood')
 

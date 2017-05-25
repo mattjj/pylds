@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from pybasicbayes.distributions import Regression
 from pybasicbayes.util.text import progprint_xrange
 from pypolyagamma.distributions import BernoulliRegression
-from pylds.models import LDS
+from pylds.models import CountLDS
 
 npr.seed(0)
 
@@ -30,7 +30,7 @@ D = np.zeros((D_obs, D_input))
 b = -2.0 * np.ones((D_obs, 1))
 
 # Simulate from a Bernoulli LDS
-truemodel = LDS(
+truemodel = CountLDS(
     dynamics_distn=Regression(A=np.hstack((A,B)), sigma=sigma_states),
     emission_distn=BernoulliRegression(D_out=D_obs, D_in=D_latent + D_input,
                                        A=np.hstack((C,D)), b=b))
@@ -39,7 +39,7 @@ inputs = np.random.randn(T, D_input)
 data, stateseq = truemodel.generate(T, inputs=inputs)
 
 # Make a model
-model = LDS(
+model = CountLDS(
     dynamics_distn=Regression(nu_0=D_latent + 2,
                               S_0=D_latent * np.eye(D_latent),
                               M_0=np.zeros((D_latent, D_latent + D_input)),
