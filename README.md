@@ -116,17 +116,4 @@ see [lds_messages.pyx](pylds/lds_messages.pyx),
 [lds_info_messages.pyx](pylds/lds_info_messages.pyx), and
 [lds_messages_interface.py](pylds/lds_messages_interface.py).
 
-# Installation
-To install `pylds` from source, first clone the repo
-
-    git clone git@github.com:mattjj/pylds.git
-    cd pylds
-
-Then install in developer mode:
-
-    pip install -e .
-
-Or use the standard install:
-
-    python setup.py install
 
