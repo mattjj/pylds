@@ -202,8 +202,8 @@ class _LDSStates(object):
         # Check if diagonal and avoid inverting D_obs x D_obs matrix
         mBTQiA = B.T.dot(J_pair_21)
         BTQi = B.T.dot(J_pair_22)
-        h_pair_1 = self.inputs.dot(mBTQiA)
-        h_pair_2 = self.inputs.dot(BTQi)
+        h_pair_1 = self.inputs[:-1].dot(mBTQiA)
+        h_pair_2 = self.inputs[:-1].dot(BTQi)
 
         log_Z_pair = -1. / 2 * np.linalg.slogdet(Q)[1]
         log_Z_pair -= self.D_latent / 2. * np.log(2 * np.pi)
@@ -362,8 +362,8 @@ class _LDSStatesMeanField(_LDSStates):
         E_BT_Qinv_A = J_pair_11[n:,:n].copy("C")
         E_BT_Qinv_B = J_pair_11[n:,n:].copy("C")
 
-        h_pair_1 = (-self.inputs.dot(E_BT_Qinv_A)).copy("C")
-        h_pair_2 = (self.inputs.dot(E_BT_Qinv)).copy("C")
+        h_pair_1 = (-self.inputs[:-1].dot(E_BT_Qinv_A)).copy("C")
+        h_pair_2 = (self.inputs[:-1].dot(E_BT_Qinv)).copy("C")
 
         log_Z_pair = 1./2 * logdet_pair * np.ones(self.T-1)
         log_Z_pair -= self.D_latent / 2. * np.log(2 * np.pi)

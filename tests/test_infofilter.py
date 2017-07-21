@@ -106,8 +106,8 @@ def info_params(A, B, sigma_states, C, D, sigma_obs, mu_init, sigma_init, data, 
     J_pair_21 = -np.linalg.solve(sigma_states,A)
     J_pair_22 = np.linalg.inv(sigma_states)
 
-    h_pair_1 = -inputs.dot(B.T).dot(np.linalg.solve(sigma_states,A))
-    h_pair_2 = inputs.dot(np.linalg.solve(sigma_states, B).T)
+    h_pair_1 = -inputs[:-1].dot(B.T).dot(np.linalg.solve(sigma_states,A))
+    h_pair_2 = inputs[:-1].dot(np.linalg.solve(sigma_states, B).T)
 
     log_Z_pair = -1. / 2 * np.linalg.slogdet(sigma_states)[1]
     log_Z_pair -= n / 2. * np.log(2 * np.pi)

@@ -90,11 +90,12 @@ def _info_argcheck(J_init, h_init, log_Z_init,
                    J_node, h_node, log_Z_node):
     T = h_node.shape[0]
     assert np.isscalar(log_Z_init)
-    J_pair_11, J_pair_21, J_pair_22, J_node = \
-        map(partial(_ensure_ndim, T=T, ndim=3),
-            [J_pair_11, J_pair_21, J_pair_22, J_node])
+    J_node = _ensure_ndim(J_node, T=T, ndim=3)
+    J_pair_11, J_pair_21, J_pair_22 = \
+        map(partial(_ensure_ndim, T=T-1, ndim=3),
+            [J_pair_11, J_pair_21, J_pair_22])
     h_pair_1, h_pair_2 = \
-        map(partial(_ensure_ndim, T=T, ndim=2),
+        map(partial(_ensure_ndim, T=T-1, ndim=2),
             [h_pair_1, h_pair_2])
     log_Z_pair = _ensure_ndim(log_Z_pair, T=T-1, ndim=1)
     log_Z_node = _ensure_ndim(log_Z_node, T=T, ndim=1)
