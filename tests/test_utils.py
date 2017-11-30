@@ -62,6 +62,7 @@ def test_solve_symm_block_tridiag():
         out2 = solve_symm_block_tridiag(H_diag, H_upper_diag, v)
         assert np.allclose(out1, out2)
 
+
 def test_logdet_symm_block_tridiag():
     n, d = 10, 3
     for _ in range(5):
@@ -80,6 +81,7 @@ def test_logdet_symm_block_tridiag():
         out1 = np.linalg.slogdet(H)[1]
         out2 = logdet_symm_block_tridiag(H_diag, H_upper_diag)
         assert np.allclose(out1, out2)
+
 
 def test_symm_block_tridiag_covariances():
     n, d = 10, 3

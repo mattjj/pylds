@@ -2,6 +2,7 @@ import numpy as np
 from pylds.models import DefaultLDS
 from pylds.laplace import LaplaceApproxPoissonLDSStates
 
+from nose.tools import nottest
 
 def random_states(T, N, D):
     model = DefaultLDS(N, D, D_input=0, sigma_states=1e8 * np.eye(D))
@@ -42,14 +43,20 @@ def test_hessian_vector_product(T=100, N=10, D=3):
     assert np.allclose(hvp1.reshape((T, D)), hvp2)
 
 
-def test_laplace_approximation(T=50000, N=100, D=10):
+def test_laplace_approximation_bfgs(T=1000, N=10, D=5):
     states = random_states(T, N, D)
     xhat = states.laplace_approximation(method="bfgs", verbose=True)
     g = states.gradient_log_joint(xhat)
     assert np.allclose(g, 0, atol=1e-2)
 
+def test_laplace_approximation_newton(T=1000, N=10, D=5):
+    states = random_states(T, N, D)
+    xhat = states.laplace_approximation(method="newton", verbose=True)
+    g = states.gradient_log_joint(xhat)
+    assert np.allclose(g, 0, atol=1e-2)
 
-def test_laplace_approximation_secondorder(T=50000, N=100, D=10):
+@nottest
+def largescale_test_laplace_approximation_newton(T=50000, N=100, D=10):
     states = random_states(T, N, D)
     xhat = states.laplace_approximation(method="newton", stepsz=.99, verbose=True)
     g = states.gradient_log_joint(xhat)
@@ -59,6 +66,7 @@ if __name__ == "__main__":
     test_gradient()
     test_hessian()
     test_hessian_vector_product()
-    test_laplace_approximation(T=1000, N=20, D=5)
-    test_laplace_approximation_secondorder(T=50000, N=100, D=10)
+    test_laplace_approximation_bfgs(T=1000, N=20, D=5)
+    test_laplace_approximation_newton(T=1000, N=20, D=5)
+    largescale_test_laplace_approximation_newton(T=50000, N=100, D=10)
 
