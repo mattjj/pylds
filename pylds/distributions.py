@@ -23,7 +23,7 @@ class PoissonRegression(Regression):
     to compute its gradients.
     """
 
-    def __init__(self, D_out, D_in, A=None, b=None, verbose=False):
+    def __init__(self, D_out, D_in, A=None, verbose=False):
         self._D_out, self._D_in = D_out, D_in
         self.verbose = verbose
 
@@ -32,12 +32,6 @@ class PoissonRegression(Regression):
             self.A = A.copy()
         else:
             self.A = 0.01 * np.random.randn(D_out, D_in)
-
-        if b is not None:
-            assert b.shape == (D_out, 1)
-            self.b = b.copy()
-        else:
-            self.b = 0.01 * np.random.randn(D_out, 1)
 
         self.sigma = None
 
@@ -64,9 +58,8 @@ class PoissonRegression(Regression):
         for n in range(self.D_out):
 
             an = self.A[n]
-            bn = self.b[n]
 
-            E_loglmbda = np.dot(mus, an) + bn
+            E_loglmbda = np.dot(mus, an)
             ll[:,n] += y[:,n] * E_loglmbda
 
             # Vectorized log likelihood calculation
@@ -83,18 +76,31 @@ class PoissonRegression(Regression):
     def D_out(self):
         return self._D_out
 
-    def max_likelihood(self, stats=None):
-        assert stats is not None
+    def predict(self, x):
+        return np.exp(x.dot(self.A.T))
 
-        verbose = self.verbose
+    def rvs(self,x=None,size=1,return_xy=True):
+        x = np.random.normal(size=(size, self.D_in)) if x is None else x
+        y = np.random.poisson(self.predict(x))
+        return np.hstack((x, y)) if return_xy else y
 
+    def max_likelihood(self, data, weights=None,stats=None):
+        """
+        Maximize the likelihood for a given value of x
+        :param data:
+        :param weights:
+        :param stats:
+        :return:
+        """
+        raise NotImplementedError
+
+    def max_expected_likelihood(self, stats, verbose=False):
         # These aren't really "sufficient" statistics, since we
         # need the mean and covariance for each time bin.
         EyxT = np.sum([s[0] for s in stats], axis=0)
-        Ey = np.sum([s[1] for s in stats], axis=0)
-        mus = np.vstack([s[2] for s in stats])
-        sigs = np.vstack([s[3] for s in stats])
-        masks = np.vstack(s[4] for s in stats)
+        mus = np.vstack([s[1] for s in stats])
+        sigs = np.vstack([s[2] for s in stats])
+        masks = np.vstack(s[3] for s in stats)
         T = mus.shape[0]
         D = self.D_in
 
@@ -103,16 +109,13 @@ class PoissonRegression(Regression):
 
             # Flatten the covariance to enable vectorized calculations
             sigs_vec = sigs.reshape((T,D**2))
-            def ll_vec(abn):
-                an = abn[:-1]
-                bn = abn[-1]
+            def ll_vec(an):
 
                 ll = 0
                 ll += np.dot(an, EyxT[n])
-                ll += bn * Ey[n]
 
                 # Vectorized log likelihood calculation
-                loglmbda = np.dot(mus, an) + bn
+                loglmbda = np.dot(mus, an)
                 aa_vec = np.outer(an, an).reshape((D ** 2,))
                 trms = np.exp(loglmbda + 0.5 * np.dot(sigs_vec, aa_vec))
                 ll -= np.sum(trms[masks[:, n]])
@@ -126,18 +129,16 @@ class PoissonRegression(Regression):
             itr = [0]
             def cbk(x):
                 itr[0] += 1
+                print("M_step iteration ", itr[0])
 
-            ab0 = np.concatenate((self.A[n], self.b[n]))
-            # res = minimize(value_and_grad(obj), cb0,
-            #                jac=True,
-            #                callback=cbk if verbose else None)
-            res = minimize(value_and_grad(obj), ab0,
-                           tol=1e-3,
-                           method="Newton-CG",
+            res = minimize(value_and_grad(obj), self.A[n],
                            jac=True,
-                           hessp=hessian_vector_product(obj),
                            callback=cbk if verbose else None)
+            # res = minimize(value_and_grad(obj), self.A[n],
+            #                tol=1e-3,
+            #                method="Newton-CG",
+            #                jac=True,
+            #                hessp=hessian_vector_product(obj),
+            #                callback=cbk if verbose else None)
             assert res.success
-            self.A[n] = res.x[:-1]
-            self.b[n] = res.x[-1]
-
+            self.A[n] = res.x

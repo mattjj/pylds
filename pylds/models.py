@@ -8,12 +8,10 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
 from pybasicbayes.distributions import DiagonalRegression, Gaussian, Regression
 from pylds.distributions import PoissonRegression
 from pylds.states import LDSStates, LDSStatesCountData, LDSStatesMissingData,\
-    LDSStatesZeroInflatedCountData, LaplaceApproxPoissonLDSStates
+    LDSStatesZeroInflatedCountData
+from pylds.laplace import LaplaceApproxPoissonLDSStates
 from pylds.util import random_rotation
 
-# NOTE: dynamics_distn should be an instance of Regression,
-# emission_distn should be an instance of Regression, and
-# init_dynamics_distn should probably be an instance of Gaussian
 
 class _LDSBase(Model):
 
@@ -460,13 +458,6 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
 
 class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
     _states_class = LaplaceApproxPoissonLDSStates
-    @property
-    def d(self):
-        return self.emission_distn.b
-
-    @d.setter
-    def d(self, value):
-        self.emission_distn.b = value
 
     def mode_log_likelihood(self):
         return sum(s.mode_log_likelihood() for s in self.states_list)
@@ -477,20 +468,16 @@ class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
     def mode_heldout_log_likelihood(self):
         return sum(s.mode_heldout_log_likelihood() for s in self.states_list)
 
-    def M_step(self):
-        self.M_step_init_dynamics_distn()
-        super(LaplaceApproxPoissonLDS, self).M_step()
+    def EM_step(self, verbose=False):
+        self.E_step(verbose=verbose)
+        self.M_step()
 
-    def M_step_init_dynamics_distn(self):
-        pass
-        # TODO: the states object does not have a E_x1_x1 term...
-        #       we could use the first of E_x_xT
-
-        # self.init_dynamics_distn.max_likelihood(
-        #     stats=(sum(s.E_x1_x1 for s in self.states_list)))
+    def E_step(self, verbose=False):
+        for s in self.states_list:
+            s.E_step(verbose=verbose)
 
     def M_step_emission_distn(self):
-        self.emission_distn.max_likelihood(
+        self.emission_distn.max_expected_likelihood(
             stats=[s.E_emission_stats for s in self.states_list])
 
     def expected_log_likelihood(self):
@@ -565,6 +552,5 @@ def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
     set_default("sigma_states", sigma_states, 0.1 * np.eye(D_latent))
 
     set_default("C", C, np.random.randn(D_obs, D_latent))
-    set_default("d", d, np.zeros((D_obs, 1)))
 
     return model
