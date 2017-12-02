@@ -1,7 +1,11 @@
 import numpy as np
 
+import importlib
+import pylds.util
+importlib.reload(pylds.util)
 from pylds.util import symm_block_tridiag_matmul, solve_symm_block_tridiag, \
-    logdet_symm_block_tridiag, compute_symm_block_tridiag_covariances
+    logdet_symm_block_tridiag, compute_symm_block_tridiag_covariances, \
+    convert_block_tridiag_to_banded, scipy_solve_symm_block_tridiag
 
 def random_symm_block_tridiags(n, d):
     """
@@ -40,6 +44,23 @@ def test_symm_block_tridiag_matmul():
         assert np.allclose(out1, out2)
 
 
+def test_convert_block_to_banded():
+    n, d = 10, 3
+    for _ in range(5):
+        H_diag, H_upper_diag = random_symm_block_tridiags(n, d)
+        H = symm_block_tridiags_to_dense(H_diag, H_upper_diag)
+
+        # Get the true ab matrix
+        ab_true = np.zeros((2*d, n*d))
+        for j in range(2*d):
+            ab_true[j, :n*d-j] = np.diag(H, -j)
+
+        ab = convert_block_tridiag_to_banded(H_diag, H_upper_diag)
+
+        for j in range(d):
+            assert np.allclose(ab_true[j], ab[j])
+
+
 def test_solve_symm_block_tridiag():
     n, d = 10, 3
     for _ in range(5):
@@ -50,8 +71,8 @@ def test_solve_symm_block_tridiag():
         min_ev = np.linalg.eigvalsh(H).min()
         if min_ev < 0:
             for i in range(n):
-                H_diag[i] += (-min_ev + .1) * np.eye(d)
-            H += (-min_ev + .1) * np.eye(n * d)
+                H_diag[i] += (-min_ev + 1e-8) * np.eye(d)
+            H += (-min_ev + 1e-8) * np.eye(n * d)
         assert np.allclose(H, symm_block_tridiags_to_dense(H_diag, H_upper_diag))
         assert np.all(np.linalg.eigvalsh(H) > 0)
 
@@ -60,7 +81,9 @@ def test_solve_symm_block_tridiag():
 
         out1 = np.linalg.solve(H, v.ravel()).reshape((n, d))
         out2 = solve_symm_block_tridiag(H_diag, H_upper_diag, v)
+        out3 = scipy_solve_symm_block_tridiag(H_diag, H_upper_diag, v)
         assert np.allclose(out1, out2)
+        assert np.allclose(out1, out3)
 
 
 def test_logdet_symm_block_tridiag():
@@ -109,8 +132,24 @@ def test_symm_block_tridiag_covariances():
 
 
 if __name__ == "__main__":
-    test_symm_block_tridiag_matmul()
-    test_solve_symm_block_tridiag()
-    test_logdet_symm_block_tridiag()
-    test_symm_block_tridiag_covariances()
+    # test_symm_block_tridiag_matmul()
+    # test_convert_block_to_banded()
+    # test_solve_symm_block_tridiag()
+    # test_logdet_symm_block_tridiag()
+    # test_symm_block_tridiag_covariances()
 
+    n = 1000
+    d = 10
+    H_diag = np.repeat(2 * np.eye(d)[None, :, :], n, axis=0)
+    H_upper_diag = np.repeat(-np.eye(d)[None, :, :], n - 1, axis=0)
+    v = np.random.randn(n, d)
+
+    # Make sure H is positive definite
+    # H = symm_block_tridiags_to_dense(H_diag, H_upper_diag)
+    # min_ev = np.linalg.eigvalsh(H).min()
+    # assert min_ev >= 0
+
+    # out1 = np.linalg.solve(H, v.ravel()).reshape((n, d))
+    out2 = solve_symm_block_tridiag(H_diag, H_upper_diag, v)
+    out3 = scipy_solve_symm_block_tridiag(H_diag, H_upper_diag, v)
+    assert np.allclose(out2, out3)

@@ -61,6 +61,58 @@ def solve_symm_block_tridiag(H_diag, H_upper_diag, v):
     return y
 
 
+def convert_block_tridiag_to_banded(H_diag, H_upper_diag):
+    """
+    convert blocks to banded matrix representation required for scipy.
+    we are using the "lower form."
+    see https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
+    """
+    T, D, _ = H_diag.shape
+    assert H_diag.ndim == 3 and H_diag.shape[2] == D
+    assert H_upper_diag.shape == (T - 1, D, D)
+    H_lower_diag = np.swapaxes(H_upper_diag, -2, -1)
+
+    ab = np.zeros((2 * D, T * D))
+
+    # Fill in blocks along the diagonal
+    for d in range(D):
+        # Get indices of (-d)-th diagonal of H_diag
+        i = np.arange(d, D)
+        j = np.arange(0, D - d)
+        h = np.column_stack((H_diag[:, i, j], np.zeros((T, d))))
+        ab[d] = h.ravel()
+
+    # Fill in lower left corner of blocks below the diagonal
+    for d in range(0, D):
+        # Get indices of (-d)-th diagonal of H_diag
+        i = np.arange(d, D)
+        j = np.arange(0, D - d)
+        h = np.column_stack((H_lower_diag[:, i, j], np.zeros((T - 1, d))))
+        ab[D + d, :D * (T - 1)] = h.ravel()
+
+    # Fill in upper corner of blocks below the diagonal
+    for d in range(1, D):
+        # Get indices of (+d)-th diagonal of H_lower_diag
+        i = np.arange(0, D - d)
+        j = np.arange(d, D)
+        h = np.column_stack((np.zeros((T - 1, d)), H_lower_diag[:, i, j]))
+        ab[D - d, :D * (T - 1)] += h.ravel()
+
+    return ab
+
+
+def scipy_solve_symm_block_tridiag(H_diag, H_upper_diag, v):
+    """
+    use scipy.linalg.solve_banded to solve a symmetric block tridiagonal system
+
+    see https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solveh_banded.html
+    """
+    from scipy.linalg import solveh_banded
+    ab = convert_block_tridiag_to_banded(H_diag, H_upper_diag)
+    x = solveh_banded(ab, v.ravel(), lower=True)
+    return x.reshape(v.shape)
+
+
 def logdet_symm_block_tridiag(H_diag, H_upper_diag):
     """
     compute the log determinant of a positive definite,

@@ -15,8 +15,9 @@ from pylds.lds_messages_interface import info_E_step, info_sample, kalman_info_f
 ###########
 
 class _LDSStates(object):
-    def __init__(self,model,T=None,data=None,inputs=None, stateseq=None,
-            initialize_from_prior=False, initialize_to_noise=True):
+    def __init__(self, model, T=None, data=None, inputs=None, stateseq=None,
+                 initialize_from_prior=False,
+                 initialize_to_noise=True):
         self.model = model
 
         self.T = T if T is not None else data.shape[0]
@@ -435,20 +436,22 @@ class LDSStates(
 
 
 class LDSStatesMissingData(_LDSStatesGibbs, _LDSStatesMeanField):
-    def __init__(self, model, data=None, mask=None, **kwargs):
+    def __init__(self, model, T=None, data=None, mask=None, **kwargs):
         if mask is not None:
             assert mask.shape == data.shape
             self.mask = mask
-        elif (data is not None) and isinstance(data, np.ndarray) and np.any(np.isnan(data)):
-            warn("data includes NaN's. Treating these as missing data.")
-            self.mask = ~np.isnan(data)
-            # TODO: We should make this unnecessary
-            warn("zeroing out nans in data to make sure code works")
-            data[np.isnan(data)] = 0
-        else:
-            self.mask = None
 
-        super(LDSStatesMissingData, self).__init__(model, data=data, **kwargs)
+        elif (data is not None) and isinstance(data, np.ndarray):
+            if np.any(np.isnan(data)):
+                warn("data includes NaN's. Treating these as missing data.")
+                self.mask = ~np.isnan(data)
+                data[np.isnan(data)] = 0
+            else:
+                self.mask = np.ones_like(data, dtype=bool)
+        else:
+            self.mask = np.ones((T, model.emission_distn.D_out), dtype=bool)
+
+        super(LDSStatesMissingData, self).__init__(model, T=T, data=data, **kwargs)
 
     @property
     def info_emission_params(self):
