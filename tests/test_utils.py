@@ -5,7 +5,8 @@ import pylds.util
 importlib.reload(pylds.util)
 from pylds.util import symm_block_tridiag_matmul, solve_symm_block_tridiag, \
     logdet_symm_block_tridiag, compute_symm_block_tridiag_covariances, \
-    convert_block_tridiag_to_banded, scipy_solve_symm_block_tridiag
+    convert_block_tridiag_to_banded, scipy_solve_symm_block_tridiag, \
+    transpose_lower_banded_matrix, scipy_sample_block_tridiag, sample_block_tridiag
 
 def random_symm_block_tridiags(n, d):
     """
@@ -131,25 +132,54 @@ def test_symm_block_tridiag_covariances():
             assert np.allclose(Sigma[(i+1)*d:(i+2)*d, i*d:(i+1)*d], E_xtp1_xt[i])
 
 
+def test_sample_block_tridiag():
+    n, d = 10, 3
+    for _ in range(5):
+        H_diag, H_upper_diag = random_symm_block_tridiags(n, d)
+        H = symm_block_tridiags_to_dense(H_diag, H_upper_diag)
+
+        # Make sure H is positive definite
+        min_ev = np.linalg.eigvalsh(H).min()
+        if min_ev < 0:
+            for i in range(n):
+                H_diag[i] += (-min_ev + .1) * np.eye(d)
+            H += (-min_ev + .1) * np.eye(n * d)
+        assert np.allclose(H, symm_block_tridiags_to_dense(H_diag, H_upper_diag))
+        assert np.all(np.linalg.eigvalsh(H) > 0)
+
+        # Cholesky of H
+        from scipy.linalg import cholesky_banded, solve_banded
+        L1 = np.linalg.cholesky(H)
+        Lab = convert_block_tridiag_to_banded(H_diag, H_upper_diag)
+        L2 = cholesky_banded(Lab, lower=True)
+        assert np.allclose(np.diag(L1), L2[0])
+        for i in range(1, 2*d):
+            assert np.allclose(np.diag(L1, -i), L2[i, :-i])
+
+        U1 = L1.T
+        U2 = transpose_lower_banded_matrix(L2)
+        Uab = convert_block_tridiag_to_banded(H_diag, H_upper_diag, lower=False)
+        U3 = cholesky_banded(Uab, lower=False)
+        assert np.allclose(np.diag(U1), U2[-1])
+        assert np.allclose(np.diag(U1), U3[-1])
+        for i in range(1, 2 * d):
+            assert np.allclose(np.diag(U1, i), U2[-(i+1), i:])
+            assert np.allclose(np.diag(U1, i), U3[-(i+1), i:])
+
+        z = np.random.randn(n*d)
+        x1 = np.linalg.solve(U1, z)
+        x2 = solve_banded((0, 2*d-1), U2, z)
+        x3 = scipy_sample_block_tridiag(H_diag, H_upper_diag, z=z)
+        assert np.allclose(x1, x2)
+        assert np.allclose(x1, x3)
+        print("success")
+
+
 if __name__ == "__main__":
-    # test_symm_block_tridiag_matmul()
-    # test_convert_block_to_banded()
-    # test_solve_symm_block_tridiag()
-    # test_logdet_symm_block_tridiag()
-    # test_symm_block_tridiag_covariances()
+    test_symm_block_tridiag_matmul()
+    test_convert_block_to_banded()
+    test_solve_symm_block_tridiag()
+    test_logdet_symm_block_tridiag()
+    test_symm_block_tridiag_covariances()
+    test_sample_block_tridiag()
 
-    n = 1000
-    d = 10
-    H_diag = np.repeat(2 * np.eye(d)[None, :, :], n, axis=0)
-    H_upper_diag = np.repeat(-np.eye(d)[None, :, :], n - 1, axis=0)
-    v = np.random.randn(n, d)
-
-    # Make sure H is positive definite
-    # H = symm_block_tridiags_to_dense(H_diag, H_upper_diag)
-    # min_ev = np.linalg.eigvalsh(H).min()
-    # assert min_ev >= 0
-
-    # out1 = np.linalg.solve(H, v.ravel()).reshape((n, d))
-    out2 = solve_symm_block_tridiag(H_diag, H_upper_diag, v)
-    out3 = scipy_solve_symm_block_tridiag(H_diag, H_upper_diag, v)
-    assert np.allclose(out2, out3)
