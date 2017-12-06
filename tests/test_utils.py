@@ -175,6 +175,33 @@ def test_sample_block_tridiag():
         print("success")
 
 
+
+def time_sample_block_tridiag():
+    from time import time
+    n, d, m = 10000, 10, 5
+    print("timing test: n={} d={}".format(n, d))
+
+    H_diag = 2 * np.eye(d)[None, :, :].repeat(n, axis=0)
+    H_upper_diag = np.eye(d)[None, :, :].repeat(n-1, axis=0)
+
+    Uab = convert_block_tridiag_to_banded(H_diag, H_upper_diag, lower=False)
+
+    tic = time()
+    for _ in range(m):
+        scipy_sample_block_tridiag(H_diag, H_upper_diag)
+    print("scipy:            {:.4f} sec".format((time() - tic)/m))
+
+    tic = time()
+    for _ in range(m):
+        scipy_sample_block_tridiag(H_diag, H_upper_diag, ab=Uab)
+    print("scipy (given ab): {:.4f} sec".format((time() - tic)/m))
+
+    tic = time()
+    for _ in range(m):
+        sample_block_tridiag(H_diag, H_upper_diag)
+    print("message passing:  {:.4f} sec".format((time() - tic)/m))
+
+
 if __name__ == "__main__":
     test_symm_block_tridiag_matmul()
     test_convert_block_to_banded()
@@ -182,4 +209,5 @@ if __name__ == "__main__":
     test_logdet_symm_block_tridiag()
     test_symm_block_tridiag_covariances()
     test_sample_block_tridiag()
+    time_sample_block_tridiag()
 
