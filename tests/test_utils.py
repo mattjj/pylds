@@ -1,8 +1,5 @@
 import numpy as np
 
-import importlib
-import pylds.util
-importlib.reload(pylds.util)
 from pylds.util import symm_block_tridiag_matmul, solve_symm_block_tridiag, \
     logdet_symm_block_tridiag, compute_symm_block_tridiag_covariances, \
     convert_block_tridiag_to_banded, scipy_solve_symm_block_tridiag, \
