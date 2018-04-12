@@ -1,39 +1,31 @@
 import numpy as np
-from pylds.models import DefaultLDS
-from pylds.laplace import LaplaceApproxPoissonLDSStates
+from pylds.models import DefaultPoissonLDS, DefaultBernoulliLDS
+from pylds.laplace import LaplaceApproxPoissonLDSStates, LaplaceApproxBernoulliLDSStates
 
 from nose.tools import nottest
 
-def random_states(T, N, D):
-    model = DefaultLDS(N, D, D_input=0, sigma_states=1e8 * np.eye(D))
-    data = np.random.poisson(3.0, size=(T, N))
-    states = LaplaceApproxPoissonLDSStates(model, data=data)
-    states.gaussian_states *= 0
-    return states
 
-def test_gradient(T=100, N=10, D=3):
-    states = random_states(T, N, D)
-    x = np.random.randn(T, D)
+def correct_gradient(states):
+    x = np.random.randn(states.T, states.D_latent)
     g_sparse = states.gradient_log_joint(x)
     g_full = states.test_gradient_log_joint(x)
     assert np.allclose(g_sparse, g_full)
 
 
-def test_hessian(T=100, N=10, D=3):
-    states = random_states(T, N, D)
-    x = np.random.randn(T, D)
+def correct_hessian(states):
+    x = np.random.randn(states.T, states.D_latent)
     H_diag, H_upper_diag = states.sparse_hessian_log_joint(x)
     H_full = states.test_hessian_log_joint(x)
 
-    for t in range(T):
+    for t in range(states.T):
         assert np.allclose(H_full[t,:,t,:], H_diag[t])
-        if t < T - 1:
+        if t < states.T - 1:
             assert np.allclose(H_full[t,:,t+1,:], H_upper_diag[t])
             assert np.allclose(H_full[t+1,:,t,:], H_upper_diag[t].T)
 
 
-def test_hessian_vector_product(T=100, N=10, D=3):
-    states = random_states(T, N, D)
+def correct_hessian_vector_product(states):
+    T, D = states.T, states.D_latent
     x = np.random.randn(T, D)
     H_full = states.test_hessian_log_joint(x)
     v = np.random.randn(T, D)
@@ -43,30 +35,110 @@ def test_hessian_vector_product(T=100, N=10, D=3):
     assert np.allclose(hvp1.reshape((T, D)), hvp2)
 
 
-def test_laplace_approximation_bfgs(T=1000, N=10, D=5):
-    states = random_states(T, N, D)
+def correct_laplace_approximation_bfgs(states):
     xhat = states.laplace_approximation(method="bfgs", verbose=True)
     g = states.gradient_log_joint(xhat)
     assert np.allclose(g, 0, atol=1e-2)
 
-def test_laplace_approximation_newton(T=1000, N=10, D=5):
-    states = random_states(T, N, D)
+def correct_laplace_approximation_newton(states):
     xhat = states.laplace_approximation(method="newton", verbose=True)
     g = states.gradient_log_joint(xhat)
     assert np.allclose(g, 0, atol=1e-2)
 
 @nottest
-def largescale_test_laplace_approximation_newton(T=50000, N=100, D=10):
-    states = random_states(T, N, D)
+def test_laplace_approximation_newton_largescale():
+    T = 50000
+    N = 100
+    D = 10
+    D_input = 1
+    model = DefaultPoissonLDS(N, D, D_input=D_input)
+    data = np.random.poisson(3.0, size=(T, N))
+    inputs = np.random.randn(T, D_input)
+    states = LaplaceApproxPoissonLDSStates(model, data=data, inputs=inputs)
+    states.gaussian_states *= 0
+
     xhat = states.laplace_approximation(method="newton", stepsz=.99, verbose=True)
     g = states.gradient_log_joint(xhat)
     assert np.allclose(g, 0, atol=1e-2)
 
-if __name__ == "__main__":
-    test_gradient()
-    test_hessian()
-    test_hessian_vector_product()
-    test_laplace_approximation_bfgs(T=1000, N=20, D=5)
-    test_laplace_approximation_newton(T=1000, N=20, D=5)
-    largescale_test_laplace_approximation_newton(T=50000, N=100, D=10)
 
+def check_random_poisson_states(check):
+    T = np.random.randint(25, 200)
+    N = np.random.randint(10, 20)
+    D = np.random.randint(1, 10)
+    D_input = np.random.randint(0, 2)
+
+    model = DefaultPoissonLDS(N, D, D_input=D_input)
+    data = np.random.poisson(3.0, size=(T, N))
+    inputs = np.random.randn(T, D_input)
+    states = LaplaceApproxPoissonLDSStates(model, data=data, inputs=inputs)
+    states.gaussian_states *= 0
+
+    check(states)
+
+
+def check_random_bernoulli_states(check):
+    T = np.random.randint(25, 200)
+    N = np.random.randint(10, 20)
+    D = np.random.randint(1, 10)
+    D_input = np.random.randint(0, 2)
+
+    model = DefaultBernoulliLDS(N, D, D_input=D_input)
+    data = np.random.rand(T, N)
+    inputs = np.random.randn(T, D_input)
+    states = LaplaceApproxBernoulliLDSStates(model, data=data, inputs=inputs)
+    states.gaussian_states *= 0
+
+    check(states)
+
+
+### Poisson tests
+def test_poisson_gradients():
+    for _ in range(5):
+        yield check_random_poisson_states, correct_gradient
+
+
+def test_poisson_hessian():
+    for _ in range(5):
+        yield check_random_poisson_states, correct_hessian
+
+
+def test_poisson_hessian_vector_product():
+    for _ in range(5):
+        yield check_random_poisson_states, correct_hessian_vector_product
+
+
+def test_poisson_laplace_approximation_bfgs():
+    for _ in range(5):
+        yield check_random_poisson_states, correct_laplace_approximation_bfgs
+
+
+def test_poisson_laplace_approximation_newton():
+    for _ in range(5):
+        yield check_random_poisson_states, correct_laplace_approximation_newton
+
+
+### Bernoulli tests
+def test_bernoulli_gradients():
+    for _ in range(5):
+        yield check_random_bernoulli_states, correct_gradient
+
+
+def test_bernoulli_hessian():
+    for _ in range(5):
+        yield check_random_bernoulli_states, correct_hessian
+
+
+def test_bernoulli_hessian_vector_product():
+    for _ in range(5):
+        yield check_random_bernoulli_states, correct_hessian_vector_product
+
+
+def test_bernoulli_laplace_approximation_bfgs():
+    for _ in range(5):
+        yield check_random_bernoulli_states, correct_laplace_approximation_bfgs
+
+
+def test_bernoulli_laplace_approximation_newton():
+    for _ in range(5):
+        yield check_random_bernoulli_states, correct_laplace_approximation_newton

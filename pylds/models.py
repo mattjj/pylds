@@ -6,10 +6,10 @@ from pybasicbayes.abstractions import Model, ModelGibbsSampling, \
     ModelEM, ModelMeanField, ModelMeanFieldSVI
 
 from pybasicbayes.distributions import DiagonalRegression, Gaussian, Regression
-from pylds.distributions import PoissonRegression
+from pylds.distributions import PoissonRegression, BernoulliRegression
 from pylds.states import LDSStates, LDSStatesCountData, LDSStatesMissingData,\
     LDSStatesZeroInflatedCountData
-from pylds.laplace import LaplaceApproxPoissonLDSStates
+from pylds.laplace import LaplaceApproxPoissonLDSStates, LaplaceApproxBernoulliLDSStates
 from pylds.util import random_rotation
 
 
@@ -456,32 +456,43 @@ class ZeroInflatedCountLDS(_LDSGibbsSampling, _LDSBase):
             self.emission_distn._resample_row_of_emission_matrix(n, xns, yns, maskns, omegans)
 
 
-class LaplaceApproxPoissonLDS(NonstationaryLDS, _NonstationaryLDSEM):
-    _states_class = LaplaceApproxPoissonLDSStates
-
-    def mode_log_likelihood(self):
-        return sum(s.mode_log_likelihood() for s in self.states_list)
-
-    def heldout_log_likelihood(self):
-        return sum(s.heldout_log_likelihood() for s in self.states_list)
-
-    def mode_heldout_log_likelihood(self):
-        return sum(s.mode_heldout_log_likelihood() for s in self.states_list)
+### Models that support Laplace approximation
+class _LaplaceApproxLDSBase(NonstationaryLDS, _NonstationaryLDSEM):
+    def log_conditional_likelihood(self):
+        return sum(s.log_conditional_likelihood(s.gaussian_states)
+                   for s in self.states_list)
 
     def EM_step(self, verbose=False):
         self.E_step(verbose=verbose)
-        self.M_step()
+        self.M_step(verbose=verbose)
 
     def E_step(self, verbose=False):
         for s in self.states_list:
             s.E_step(verbose=verbose)
 
-    def M_step_emission_distn(self):
+    def M_step(self, verbose=False):
+        self.M_step_dynamics_distn()
+        self.M_step_emission_distn(verbose=verbose)
+
+    def M_step_emission_distn(self, verbose=False):
+        # self.emission_distn.max_likelihood(
+        #     data=[(np.hstack((s.gaussian_states, s.inputs)), s.data)
+        #           for s in self.states_list])
+
         self.emission_distn.max_expected_likelihood(
-            stats=[s.E_emission_stats for s in self.states_list])
+            stats=[s.E_emission_stats for s in self.states_list],
+            verbose=verbose)
 
     def expected_log_likelihood(self):
         return sum([s.expected_log_likelihood() for s in self.states_list])
+
+
+class LaplaceApproxPoissonLDS(_LaplaceApproxLDSBase):
+    _states_class = LaplaceApproxPoissonLDSStates
+
+
+class LaplaceApproxBernoulliLDS(_LaplaceApproxLDSBase):
+    _states_class = LaplaceApproxBernoulliLDSStates
 
 
 ##############################
@@ -526,19 +537,19 @@ def DefaultLDS(D_obs, D_latent, D_input=0,
 def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
                       mu_init=None, sigma_init=None,
                       A=None, B=None, sigma_states=None,
-                      C=None, d=None,
+                      C=None, D=None
                       ):
-    assert D_input == 0, "Inputs are not yet supported for Poisson LDS"
     model = LaplaceApproxPoissonLDS(
         init_dynamics_distn=
-            Gaussian(mu_0=np.zeros(D_latent), sigma_0=np.eye(D_latent),
-                     kappa_0=1.0, nu_0=D_latent + 1),
-        dynamics_distn=
-            Regression(A=0.9 * np.eye(D_latent), sigma=np.eye(D_latent),
-                       nu_0=D_latent + 1, S_0=D_latent * np.eye(D_latent),
-                       M_0=np.zeros((D_latent, D_latent)), K_0=D_latent * np.eye(D_latent)),
+        Gaussian(mu_0=np.zeros(D_latent), sigma_0=np.eye(D_latent),
+                 kappa_0=1.0, nu_0=D_latent + 1),
+        dynamics_distn=Regression(
+            nu_0=D_latent + 1,
+            S_0=D_latent * np.eye(D_latent),
+            M_0=np.zeros((D_latent, D_latent + D_input)),
+            K_0=D_latent * np.eye(D_latent + D_input)),
         emission_distn=
-            PoissonRegression(D_obs, D_latent, verbose=False))
+            PoissonRegression(D_obs, D_latent + D_input, verbose=False))
 
     set_default = \
         lambda prm, val, default: \
@@ -552,5 +563,40 @@ def DefaultPoissonLDS(D_obs, D_latent, D_input=0,
     set_default("sigma_states", sigma_states, 0.1 * np.eye(D_latent))
 
     set_default("C", C, np.random.randn(D_obs, D_latent))
+    set_default("D", D, 0.1 * np.random.randn(D_obs, D_input))
+
+    return model
+
+
+def DefaultBernoulliLDS(D_obs, D_latent, D_input=0,
+                        mu_init=None, sigma_init=None,
+                        A=None, B=None, sigma_states=None,
+                        C=None, D=None
+                        ):
+    model = LaplaceApproxBernoulliLDS(
+        init_dynamics_distn=
+            Gaussian(mu_0=np.zeros(D_latent), sigma_0=np.eye(D_latent),
+                     kappa_0=1.0, nu_0=D_latent + 1),
+        dynamics_distn=Regression(
+            nu_0=D_latent + 1,
+            S_0=D_latent * np.eye(D_latent),
+            M_0=np.zeros((D_latent, D_latent + D_input)),
+            K_0=D_latent * np.eye(D_latent + D_input)),
+        emission_distn=
+            BernoulliRegression(D_obs, D_latent + D_input, verbose=False))
+
+    set_default = \
+        lambda prm, val, default: \
+            model.__setattr__(prm, val if val is not None else default)
+
+    set_default("mu_init", mu_init, np.zeros(D_latent))
+    set_default("sigma_init", sigma_init, np.eye(D_latent))
+
+    set_default("A", A, 0.99 * random_rotation(D_latent))
+    set_default("B", B, 0.1 * np.random.randn(D_latent, D_input))
+    set_default("sigma_states", sigma_states, 0.1 * np.eye(D_latent))
+
+    set_default("C", C, np.random.randn(D_obs, D_latent))
+    set_default("D", D, 0.1 * np.random.randn(D_obs, D_input))
 
     return model

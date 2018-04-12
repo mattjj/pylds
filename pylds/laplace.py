@@ -3,7 +3,7 @@ from autograd.scipy.special import gammaln
 from autograd import grad, hessian
 
 from pylds.states import _LDSStates
-from pylds.util import symm_block_tridiag_matmul, logdet_symm_block_tridiag
+from pylds.util import symm_block_tridiag_matmul
 from pylds.lds_messages_interface import info_E_step
 
 
@@ -17,10 +17,6 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
     Combining this with a Gaussian LDS prior on the states,
     we can compute the gradient and Hessian of the log likelihood.
     """
-    def __init__(self, model, **kwargs):
-
-        super(_LaplaceApproxLDSStatesBase, self).__init__(model, **kwargs)
-
     def local_log_likelihood(self, xt, yt, ut):
         """
         Return log p(yt | xt).  Implement this in base classes.
@@ -125,6 +121,9 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
         # Collect the likelihood terms
         H_diag += self.hessian_local_log_likelihood(x)
 
+        # Subtract a little bit to ensure negative definiteness
+        H_diag -= 1e-8 * np.eye(D)
+
         return H_diag, H_upper_diag
 
     def hessian_vector_product_log_joint(self, x, v):
@@ -183,10 +182,9 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
 
         x0 = self.gaussian_states.reshape((T * D,))
 
-        if verbose:
-            print("Fitting Laplace approximation")
-
+        # Make callback
         itr = [0]
+
         def cbk(x):
             print("Iteration: ", itr[0],
                   "\tObjective: ", obj(x).round(2),
@@ -194,6 +192,9 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
             itr[0] += 1
 
         # Second order method
+        if verbose:
+            print("Fitting Laplace approximation")
+
         res = minimize(obj, x0,
                        tol=tol,
                        method="Newton-CG",
@@ -208,18 +209,18 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
         # Unflatten and compute the expected sufficient statistics
         return mu.reshape((T, D))
 
-    def _laplace_approximation_newton(self, tol=1e-6, stepsz=0.99, verbose=False):
+    def _laplace_approximation_newton(self, tol=1e-6, stepsz=0.9, verbose=False):
         """
         Solve a block tridiagonal system with message passing.
         """
-        from pylds.util import solve_symm_block_tridiag
+        from pylds.util import solve_symm_block_tridiag, scipy_solve_symm_block_tridiag
         scale = self.T * self.D_emission
 
         def newton_step(x, stepsz):
-            assert stepsz >= 0 and stepsz <= 1
+            assert 0 <= stepsz <= 1
             g = self.gradient_log_joint(x)
             H_diag, H_upper_diag = self.sparse_hessian_log_joint(x)
-            Hinv_g = -solve_symm_block_tridiag(-H_diag / scale,
+            Hinv_g = -scipy_solve_symm_block_tridiag(-H_diag / scale,
                                                -H_upper_diag / scale,
                                                g / scale)
             return x - stepsz * Hinv_g
@@ -282,43 +283,38 @@ class _LaplaceApproxLDSStatesBase(_LDSStates):
         self._set_expected_stats(self.gaussian_states, self.smoothed_sigmas, E_xtp1_xtT)
 
     def _set_expected_stats(self, mu, sigmas, E_xtp1_xtT):
-        # Compute expectations!
-        Cov_xtp1_xtT = np.transpose(E_xtp1_xtT, [0, 2, 1])
+        # Get the emission stats
+        p, n, d, T, inputs, y = \
+            self.D_emission, self.D_latent, self.D_input, self.T, \
+            self.inputs, self.data
 
-        E_xtp1_xtT = \
-            Cov_xtp1_xtT + \
-            np.array([np.outer(mu[t + 1], mu[t])
-                      for t in range(self.T - 1)])
-        assert not np.isnan(E_xtp1_xtT).any()
+        E_x_xT = sigmas + mu[:, :, None] * mu[:, None, :]
+        E_x_uT = mu[:, :, None] * self.inputs[:, None, :]
+        E_u_uT = self.inputs[:, :, None] * self.inputs[:, None, :]
 
-        ExxT = sigmas.sum(0) + mu.T.dot(mu)
+        E_xu_xuT = np.concatenate((
+            np.concatenate((E_x_xT, E_x_uT), axis=2),
+            np.concatenate((np.transpose(E_x_uT, (0, 2, 1)), E_u_uT), axis=2)),
+            axis=1)
+        E_xut_xutT = E_xu_xuT[:-1].sum(0)
 
-        E_xt_xtT = \
-            ExxT - (sigmas[-1]
-                    + np.outer(mu[-1], mu[-1]))
-        E_xtp1_xtp1T = \
-            ExxT - (sigmas[0]
-                    + np.outer(mu[0], mu[0]))
-
+        E_xtp1_xtp1T = E_x_xT[1:].sum(0)
         E_xtp1_xtT = E_xtp1_xtT.sum(0)
 
-        def is_symmetric(A):
-            return np.allclose(A, A.T)
+        E_xtp1_utT = (mu[1:, :, None] * inputs[:-1, None, :]).sum(0)
+        E_xtp1_xutT = np.hstack((E_xtp1_xtT, E_xtp1_utT))
 
-        assert is_symmetric(ExxT)
-        assert is_symmetric(E_xt_xtT)
-        assert is_symmetric(E_xtp1_xtp1T)
-
-        self.E_dynamics_stats = \
-            np.array([E_xtp1_xtp1T, E_xtp1_xtT, E_xt_xtT, self.T - 1])
+        self.E_dynamics_stats = np.array(
+            [E_xtp1_xtp1T, E_xtp1_xutT, E_xut_xutT, self.T - 1])
 
         # Compute the expectations for the observations
-        y = self.data
-        EyxT = np.sum(y[:, :, None] * mu[:, None, :], axis=0)
-        self.E_emission_stats = np.array([EyxT, mu, sigmas, np.ones_like(y, dtype=bool)])
+        E_yxT = np.sum(y[:, :, None] * mu[:, None, :], axis=0)
+        E_yuT = y.T.dot(inputs)
+        E_yxuT = np.hstack((E_yxT, E_yuT))
+        self.E_emission_stats = np.array([E_yxuT, mu, sigmas, inputs, np.ones_like(y, dtype=bool)])
 
     def smooth(self):
-        return self.emission_distn.predict(self.gaussian_states)
+        return self.emission_distn.predict(np.hstack((self.gaussian_states, self.inputs)))
 
 
 class LaplaceApproxPoissonLDSStates(_LaplaceApproxLDSStatesBase):
@@ -369,7 +365,7 @@ class LaplaceApproxPoissonLDSStates(_LaplaceApproxLDSStatesBase):
         lmbda = np.exp(np.dot(x, self.C.T) + np.dot(self.inputs, self.D.T))
         return np.einsum('tn, ni, nj ->tij', -lmbda, self.C, self.C)
 
-    ### Test hooks
+    # Test hooks
     def test_joint_probability(self, x):
         # A differentiable function to compute the joint probability for a given
         # latent state sequence
@@ -395,6 +391,123 @@ class LaplaceApproxPoissonLDSStates(_LaplaceApproxLDSStatesBase):
 
         ll += anp.sum(y * loglmbda)
         ll -= anp.sum(lmbda)
+
+        if anp.isnan(ll):
+            ll = -anp.inf
+
+        return ll
+
+    def test_gradient_log_joint(self, x):
+        return grad(self.test_joint_probability)(x)
+
+    def test_hessian_log_joint(self, x):
+        return hessian(self.test_joint_probability)(x)
+
+
+class LaplaceApproxBernoulliLDSStates(_LaplaceApproxLDSStatesBase):
+    """
+    Bernoulli observations with Laplace approximation
+
+    Let \psi_t = C x_t + D u_t
+
+    p(y_t = 1 | x_t) = \sigma(\psi_t)
+
+    log p(y_t | x_t) = y_t \log \sigma(\psi_t) +
+                       (1-y_t) \log \sigma(-\psi_t) +
+
+                     = y_t \psi_t - log (1 + exp(\psi_t))
+
+    use the log-sum-exp trick to compute this:
+                     = y_t \psi_t - log {exp(0) + exp(\psi_t)}
+                     = y_t \psi_t - log {m [exp(0 - log m) + exp(\psi_t - log m)]}
+                     = y_t \psi_t - log m - log {exp(-log m) + exp(\psi_t - log m)}
+
+    set log m = max(0, psi)
+
+    """
+    def local_log_likelihood(self, xt, yt, ut):
+        # Observation likelihoods
+        C, D = self.C, self.D
+
+        psi = C.dot(xt) + D.dot(ut)
+
+        ll = np.sum(yt * psi)
+
+        # Compute second term with log-sum-exp trick (see above)
+        logm = np.maximum(0, psi)
+        ll -= np.sum(logm)
+        ll -= np.sum(np.log(np.exp(-logm) + np.exp(psi - logm)))
+        return ll
+
+    # Override likelihood, gradient, and hessian with vectorized forms
+    def log_conditional_likelihood(self, x):
+        # Observation likelihoods
+        C, D, u, y = self.C, self.D, self.inputs, self.data
+        psi = x.dot(C.T) + u.dot(D.T)
+
+        # First term is linear in psi
+        ll = np.sum(y * psi)
+
+        # Compute second term with log-sum-exp trick (see above)
+        logm = np.maximum(0, psi)
+        ll -= np.sum(logm)
+        ll -= np.sum(np.log(np.exp(-logm) + np.exp(psi - logm)))
+
+        return ll
+
+    def grad_local_log_likelihood(self, x):
+        """
+        d/d \psi  y \psi - log (1 + exp(\psi))
+            = y - exp(\psi) / (1 + exp(\psi))
+            = y - sigma(psi)
+            = y - p
+
+        d \psi / dx = C
+
+        d / dx = (y - sigma(psi)) * C
+        """
+        C, D, u, y = self.C, self.D, self.inputs, self.data
+        psi = x.dot(C.T) + u.dot(D.T)
+        p = 1. / (1 + np.exp(-psi))
+        return (y - p).dot(C)
+
+    def hessian_local_log_likelihood(self, x):
+        """
+        d/dx  (y - p) * C
+            = -dpsi/dx (dp/d\psi)  C
+            = -C p (1-p) C
+        """
+        C, D, u, y = self.C, self.D, self.inputs, self.data
+        psi = x.dot(C.T) + u.dot(D.T)
+        p = 1. / (1 + np.exp(-psi))
+        dp_dpsi = p * (1 - p)
+        return np.einsum('tn, ni, nj ->tij', -dp_dpsi, self.C, self.C)
+
+    # Test hooks
+    def test_joint_probability(self, x):
+        # A differentiable function to compute the joint probability for a given
+        # latent state sequence
+        import autograd.numpy as anp
+        T = self.T
+        ll = 0
+
+        # Initial likelihood
+        mu_init, sigma_init = self.mu_init, self.sigma_init
+        ll += -0.5 * anp.dot(x[0] - mu_init, anp.linalg.solve(sigma_init, x[0] - mu_init))
+
+        # Transition likelihoods
+        A, B, Q = self.A, self.B, self.sigma_states
+        xpred = anp.dot(x[:T-1], A.T) + anp.dot(self.inputs[:T-1], B.T)
+        dx = x[1:] - xpred
+        ll += -0.5 * (dx.T * anp.linalg.solve(Q, dx.T)).sum()
+
+        # Observation likelihoods
+        y = self.data
+        C, D = self.C, self.D
+        psi = (anp.dot(x, C.T) + anp.dot(self.inputs, D.T))
+
+        ll += anp.sum(y * psi)
+        ll -= anp.sum(np.log(1 + np.exp(psi)))
 
         if anp.isnan(ll):
             ll = -anp.inf
